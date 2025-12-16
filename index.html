@@ -548,12 +548,17 @@
         if 'Close' not in df.columns:
             raise ValueError(f"CSV must have a 'Close' price column. Found columns: {list(df.columns)}")
         
-        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+        # Defensive: Clean all numeric columns - remove commas and convert to numeric
+        for col in df.columns:
+            if col != 'Date':
+                # Convert to string, remove commas, convert to numeric
+                df[col] = df[col].astype(str).str.replace(',', '', regex=False)
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        
+        df['Date'] = pd.to_datetime(df['Date'], errors='coerce', dayfirst=True)
         df = df.dropna(subset=['Date', 'Close'])
         df = df.sort_values('Date')
         df.set_index('Date', inplace=True)
-        df['Close'] = pd.to_numeric(df['Close'], errors='coerce')
-        df.dropna(subset=['Close'], inplace=True)
 
         document.getElementById("output").innerHTML = f"<p><b>📅 Date Range:</b> {df.index.min().date()} to {df.index.max().date()}</p><p><b>🔢 Rows:</b> {len(df)}</p><p><b>🧾 Columns:</b> {', '.join(df.columns)}</p>"
 
