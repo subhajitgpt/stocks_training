@@ -1,0 +1,14 @@
+[project]
+name = "stock-training"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "flask",
+    "pandas",
+    "seaborn",
+    "yfinance",
+    "requests",
+    "matplotlib>=3.10.7",
+]
