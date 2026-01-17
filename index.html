@@ -322,9 +322,11 @@
 
     // Candlestick chart variables
     let chartData = [];
+    let hoveredCandle = null;
+    let chartMetrics = null;
     
     // Candlestick chart drawing function
-    function drawCandlestickChart(data) {
+    function drawCandlestickChart(data, hoverIndex = null) {
       const canvas = document.getElementById('candlestickChart');
       const ctx = canvas.getContext('2d');
       
@@ -361,6 +363,17 @@
       
       const candleWidth = Math.max(2, chartWidth / displayData.length * 0.7);
       const candleSpacing = chartWidth / displayData.length;
+      
+      // Store metrics for hover detection
+      chartMetrics = {
+        padding,
+        candleSpacing,
+        candleWidth,
+        displayData,
+        chartWidth,
+        chartHeight,
+        getY
+      };
       
       // Draw "Price" label on Y-axis
       ctx.save();
@@ -470,6 +483,72 @@
       ctx.font = '12px Arial';
       ctx.textAlign = 'right';
       ctx.fillText('🟩 Bullish (Close ≥ Open)  🟥 Bearish (Close < Open)', width - padding.right, 25);
+      
+      // Draw hover tooltip
+      if (hoverIndex !== null && hoverIndex >= 0 && hoverIndex < displayData.length) {
+        const candle = displayData[hoverIndex];
+        const x = padding.left + (hoverIndex * candleSpacing) + (candleSpacing / 2);
+        
+        // Draw vertical crosshair
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([5, 5]);
+        ctx.beginPath();
+        ctx.moveTo(x, padding.top);
+        ctx.lineTo(x, padding.top + chartHeight);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        
+        // Draw tooltip box
+        const tooltipWidth = 180;
+        const tooltipHeight = 120;
+        let tooltipX = x + 15;
+        let tooltipY = padding.top + 50;
+        
+        // Keep tooltip within canvas bounds
+        if (tooltipX + tooltipWidth > width - padding.right) {
+          tooltipX = x - tooltipWidth - 15;
+        }
+        
+        // Draw tooltip background
+        ctx.fillStyle = 'rgba(30, 34, 45, 0.95)';
+        ctx.strokeStyle = '#4a4e59';
+        ctx.lineWidth = 1;
+        ctx.fillRect(tooltipX, tooltipY, tooltipWidth, tooltipHeight);
+        ctx.strokeRect(tooltipX, tooltipY, tooltipWidth, tooltipHeight);
+        
+        // Draw tooltip content
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 13px Arial';
+        ctx.textAlign = 'left';
+        const dateStr = candle.date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+        ctx.fillText(dateStr, tooltipX + 10, tooltipY + 20);
+        
+        ctx.font = '12px Arial';
+        ctx.fillStyle = '#b2b5be';
+        const lines = [
+          { label: 'Open:', value: '₹' + candle.open.toFixed(2), color: '#b2b5be' },
+          { label: 'High:', value: '₹' + candle.high.toFixed(2), color: '#26a69a' },
+          { label: 'Low:', value: '₹' + candle.low.toFixed(2), color: '#ef5350' },
+          { label: 'Close:', value: '₹' + candle.close.toFixed(2), color: '#ffffff' },
+          { label: 'Volume:', value: (candle.volume / 1000000).toFixed(2) + 'M', color: '#b2b5be' }
+        ];
+        
+        lines.forEach((line, i) => {
+          ctx.fillStyle = '#b2b5be';
+          ctx.fillText(line.label, tooltipX + 10, tooltipY + 45 + (i * 15));
+          ctx.fillStyle = line.color;
+          ctx.textAlign = 'right';
+          ctx.fillText(line.value, tooltipX + tooltipWidth - 10, tooltipY + 45 + (i * 15));
+          ctx.textAlign = 'left';
+        });
+        
+        // Update header with hovered candle data
+        document.getElementById('openPrice').textContent = candle.open.toFixed(2);
+        document.getElementById('highPrice').textContent = candle.high.toFixed(2);
+        document.getElementById('lowPrice').textContent = candle.low.toFixed(2);
+        document.getElementById('closePrice').textContent = candle.close.toFixed(2);
+      }
     }
     
     // Load CSV for candlestick chart
@@ -521,6 +600,68 @@
       }
       
       drawCandlestickChart(chartData);
+    });
+    
+    // Add mouse move event for hover tooltips
+    document.getElementById('candlestickChart').addEventListener('mousemove', (e) => {
+      if (!chartMetrics || chartData.length === 0) return;
+      
+      const canvas = document.getElementById('candlestickChart');
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+      
+      // Check if mouse is within chart area
+      const { padding, candleSpacing, displayData, chartWidth, chartHeight } = chartMetrics;
+      
+      if (mouseX >= padding.left && mouseX <= padding.left + chartWidth &&
+          mouseY >= padding.top && mouseY <= padding.top + chartHeight) {
+        
+        // Calculate which candle is being hovered
+        const relativeX = mouseX - padding.left;
+        const index = Math.floor(relativeX / candleSpacing);
+        
+        if (index >= 0 && index < displayData.length) {
+          hoveredCandle = index;
+          drawCandlestickChart(chartData, hoveredCandle);
+          canvas.style.cursor = 'crosshair';
+          return;
+        }
+      }
+      
+      // Mouse outside chart area
+      if (hoveredCandle !== null) {
+        hoveredCandle = null;
+        drawCandlestickChart(chartData);
+        
+        // Reset header to latest data
+        if (chartData.length > 0) {
+          const latest = chartData[chartData.length - 1];
+          document.getElementById('openPrice').textContent = latest.open.toFixed(2);
+          document.getElementById('highPrice').textContent = latest.high.toFixed(2);
+          document.getElementById('lowPrice').textContent = latest.low.toFixed(2);
+          document.getElementById('closePrice').textContent = latest.close.toFixed(2);
+        }
+      }
+      canvas.style.cursor = 'default';
+    });
+    
+    // Reset on mouse leave
+    document.getElementById('candlestickChart').addEventListener('mouseleave', () => {
+      if (hoveredCandle !== null) {
+        hoveredCandle = null;
+        drawCandlestickChart(chartData);
+        
+        // Reset header to latest data
+        if (chartData.length > 0) {
+          const latest = chartData[chartData.length - 1];
+          document.getElementById('openPrice').textContent = latest.open.toFixed(2);
+          document.getElementById('highPrice').textContent = latest.high.toFixed(2);
+          document.getElementById('lowPrice').textContent = latest.low.toFixed(2);
+          document.getElementById('closePrice').textContent = latest.close.toFixed(2);
+        }
+      }
+      document.getElementById('candlestickChart').style.cursor = 'default';
     });
     
     // Redraw chart on window resize
