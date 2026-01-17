@@ -522,6 +522,15 @@
         # Clean data - handle various column name formats
         df.columns = df.columns.str.strip()
         
+        # Replace spaces with underscores in column names
+        df.columns = df.columns.str.replace(' ', '_', regex=False)
+        
+        # Handle duplicate column names by adding suffixes
+        cols = pd.Series(df.columns)
+        for dup in cols[cols.duplicated()].unique():
+            cols[cols[cols == dup].index.values.tolist()] = [dup + '_' + str(i) if i != 0 else dup for i in range(sum(cols == dup))]
+        df.columns = cols
+        
         # Create a mapping for common column name variations
         column_mapping = {}
         for col in df.columns:
@@ -541,6 +550,9 @@
         
         df = df.rename(columns=column_mapping)
         
+        # Handle duplicate columns after mapping (keep first occurrence)
+        df = df.loc[:, ~df.columns.duplicated(keep='first')]
+        
         # Check for required columns
         if 'Date' not in df.columns:
             raise ValueError(f"CSV must have a date column. Found columns: {list(df.columns)}")
@@ -551,9 +563,10 @@
         # Defensive: Clean all numeric columns - remove commas and convert to numeric
         for col in df.columns:
             if col != 'Date':
-                # Convert to string, remove commas, convert to numeric
-                df[col] = df[col].astype(str).str.replace(',', '', regex=False)
-                df[col] = pd.to_numeric(df[col], errors='coerce')
+                # Ensure we're working with a Series, convert to string, remove commas, convert to numeric
+                series_data = df[col] if isinstance(df[col], pd.Series) else df[col].iloc[:, 0]
+                series_data = series_data.astype(str).str.replace(',', '', regex=False)
+                df[col] = pd.to_numeric(series_data, errors='coerce')
         
         df['Date'] = pd.to_datetime(df['Date'], errors='coerce', dayfirst=True)
         df = df.dropna(subset=['Date', 'Close'])
