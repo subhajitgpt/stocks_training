@@ -87,6 +87,108 @@
     .price-change.negative {
       color: #ef5350;
     }
+    .backtest-controls {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 24px;
+      align-items: flex-end;
+    }
+    .control-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .control-group label {
+      font-weight: bold;
+      font-size: 14px;
+      color: #333;
+    }
+    .control-group input, .control-group select {
+      padding: 8px 12px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+    .btn-backtest {
+      padding: 10px 24px;
+      background: #007bff;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: bold;
+      margin-top: auto;
+    }
+    .btn-backtest:hover {
+      background: #0056b3;
+    }
+    .btn-backtest:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+    .results-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .metric-card {
+      background: #f8f9fa;
+      padding: 16px;
+      border-radius: 8px;
+      border-left: 4px solid #007bff;
+    }
+    .metric-card.positive {
+      border-left-color: #26a69a;
+    }
+    .metric-card.negative {
+      border-left-color: #ef5350;
+    }
+    .metric-label {
+      font-size: 12px;
+      color: #666;
+      margin-bottom: 4px;
+    }
+    .metric-value {
+      font-size: 24px;
+      font-weight: bold;
+      color: #333;
+    }
+    .metric-value.positive {
+      color: #26a69a;
+    }
+    .metric-value.negative {
+      color: #ef5350;
+    }
+    .trades-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 16px;
+      background: white;
+    }
+    .trades-table th {
+      background: #f8f9fa;
+      padding: 12px;
+      text-align: left;
+      font-weight: bold;
+      border-bottom: 2px solid #ddd;
+    }
+    .trades-table td {
+      padding: 10px 12px;
+      border-bottom: 1px solid #eee;
+    }
+    .trades-table tr:hover {
+      background: #f8f9fa;
+    }
+    .profit {
+      color: #26a69a;
+      font-weight: bold;
+    }
+    .loss {
+      color: #ef5350;
+      font-weight: bold;
+    }
     #aiPanel {
       position: fixed;
       bottom: 20px;
@@ -246,6 +348,7 @@
   <div class="tabs">
     <button class="tab active" onclick="switchTab('analysis')">📊 Analysis</button>
     <button class="tab" onclick="switchTab('chart')">📈 Candlestick Chart</button>
+    <button class="tab" onclick="switchTab('backtest')">🔬 Backtest Strategy</button>
   </div>
 
   <!-- Tab 1: Analysis -->
@@ -275,6 +378,60 @@
     <input type="file" id="fileInputChart" accept=".csv" style="margin-bottom: 16px;">
     <div id="chartContainer">
       <canvas id="candlestickChart"></canvas>
+    </div>
+  </div>
+
+  <!-- Tab 3: Backtest Strategy -->
+  <div id="backtestTab" class="tab-content">
+    <h2>🔬 MA Crossover Strategy Backtesting</h2>
+    <p>Test the 21 MA / 50 MA crossover strategy on historical data to evaluate performance.</p>
+    
+    <div class="backtest-controls">
+      <div class="control-group">
+        <label>Upload CSV Data</label>
+        <input type="file" id="fileInputBacktest" accept=".csv">
+      </div>
+      <div class="control-group">
+        <label>Initial Capital (₹)</label>
+        <input type="number" id="initialCapital" value="100000" min="1000" step="1000">
+      </div>
+      <div class="control-group">
+        <label>Short MA Period</label>
+        <input type="number" id="shortMA" value="21" min="5" max="50">
+      </div>
+      <div class="control-group">
+        <label>Long MA Period</label>
+        <input type="number" id="longMA" value="50" min="20" max="200">
+      </div>
+      <button class="btn-backtest" id="runBacktest" disabled>Run Backtest</button>
+    </div>
+    
+    <div id="backtestResults" style="display: none;">
+      <h3>📊 Performance Summary</h3>
+      <div class="results-grid" id="metricsGrid"></div>
+      
+      <h3>📈 Equity Curve</h3>
+      <canvas id="equityCurve" width="1000" height="300" style="background: white; border-radius: 8px; max-width: 100%;"></canvas>
+      
+      <h3>💼 Trade History</h3>
+      <div style="overflow-x: auto;">
+        <table class="trades-table" id="tradesTable">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Type</th>
+              <th>Date</th>
+              <th>Price</th>
+              <th>Quantity</th>
+              <th>Value</th>
+              <th>P&L</th>
+              <th>P&L %</th>
+              <th>Capital</th>
+            </tr>
+          </thead>
+          <tbody id="tradesTableBody"></tbody>
+        </table>
+      </div>
     </div>
   </div>
 
@@ -317,6 +474,9 @@
       } else if (tabName === 'chart') {
         document.getElementById('chartTab').classList.add('active');
         tabs[1].classList.add('active');
+      } else if (tabName === 'backtest') {
+        document.getElementById('backtestTab').classList.add('active');
+        tabs[2].classList.add('active');
       }
     }
 
@@ -849,6 +1009,306 @@
         drawCandlestickChart(chartData);
       }
     });
+
+    // ============ BACKTESTING SECTION ============
+    let backtestData = [];
+    
+    // Load CSV for backtesting
+    document.getElementById('fileInputBacktest').addEventListener('change', async (evt) => {
+      const file = evt.target.files[0];
+      if (!file) {
+        document.getElementById('runBacktest').disabled = true;
+        return;
+      }
+      
+      const text = await file.text();
+      const lines = text.trim().split('\n');
+      const headers = lines[0].split(',').map(h => h.trim());
+      
+      backtestData = [];
+      for (let i = 1; i < lines.length; i++) {
+        const values = lines[i].split(',');
+        const row = {};
+        headers.forEach((h, idx) => {
+          row[h] = values[idx];
+        });
+        
+        const dateParts = row['Date'].split('/');
+        const date = new Date(dateParts[2], dateParts[1] - 1, dateParts[0]);
+        
+        backtestData.push({
+          date: date,
+          open: parseFloat(row['Open']),
+          high: parseFloat(row['High']),
+          low: parseFloat(row['Low']),
+          close: parseFloat(row['Close']),
+          volume: parseFloat(row['Volume'])
+        });
+      }
+      
+      document.getElementById('runBacktest').disabled = false;
+    });
+    
+    // Run backtest
+    document.getElementById('runBacktest').addEventListener('click', () => {
+      if (backtestData.length === 0) return;
+      
+      const initialCapital = parseFloat(document.getElementById('initialCapital').value);
+      const shortPeriod = parseInt(document.getElementById('shortMA').value);
+      const longPeriod = parseInt(document.getElementById('longMA').value);
+      
+      // Calculate MAs
+      const shortMA = calculateMA(backtestData, shortPeriod);
+      const longMA = calculateMA(backtestData, longPeriod);
+      
+      // Detect signals
+      const signals = detectCrossovers(shortMA, longMA);
+      
+      // Run backtest simulation
+      let capital = initialCapital;
+      let position = 0; // number of shares
+      let trades = [];
+      let entryPrice = 0;
+      let equityCurve = [];
+      
+      // Initialize equity curve
+      for (let i = 0; i < backtestData.length; i++) {
+        equityCurve.push(capital);
+      }
+      
+      signals.forEach((signal, idx) => {
+        const i = signal.index;
+        const price = backtestData[i].close;
+        const date = backtestData[i].date;
+        
+        if (signal.type === 'buy' && position === 0) {
+          // Buy signal - enter position
+          position = Math.floor(capital / price);
+          entryPrice = price;
+          const value = position * price;
+          capital -= value;
+          
+          trades.push({
+            type: 'BUY',
+            date: date,
+            price: price,
+            quantity: position,
+            value: value,
+            pl: 0,
+            plPercent: 0,
+            capital: capital + (position * price)
+          });
+          
+          // Update equity curve from this point
+          for (let j = i; j < backtestData.length; j++) {
+            equityCurve[j] = capital + (position * backtestData[j].close);
+          }
+        } 
+        else if (signal.type === 'sell' && position > 0) {
+          // Sell signal - exit position
+          const value = position * price;
+          const pl = value - (position * entryPrice);
+          const plPercent = (pl / (position * entryPrice)) * 100;
+          capital += value;
+          
+          trades.push({
+            type: 'SELL',
+            date: date,
+            price: price,
+            quantity: position,
+            value: value,
+            pl: pl,
+            plPercent: plPercent,
+            capital: capital
+          });
+          
+          position = 0;
+          
+          // Update equity curve from this point
+          for (let j = i; j < backtestData.length; j++) {
+            equityCurve[j] = capital;
+          }
+        }
+      });
+      
+      // Close any open position at the end
+      if (position > 0) {
+        const lastPrice = backtestData[backtestData.length - 1].close;
+        const lastDate = backtestData[backtestData.length - 1].date;
+        const value = position * lastPrice;
+        const pl = value - (position * entryPrice);
+        const plPercent = (pl / (position * entryPrice)) * 100;
+        capital += value;
+        
+        trades.push({
+          type: 'SELL (Close)',
+          date: lastDate,
+          price: lastPrice,
+          quantity: position,
+          value: value,
+          pl: pl,
+          plPercent: plPercent,
+          capital: capital
+        });
+        position = 0;
+      }
+      
+      // Calculate metrics
+      const finalCapital = capital;
+      const totalReturn = ((finalCapital - initialCapital) / initialCapital) * 100;
+      const buyHoldReturn = ((backtestData[backtestData.length-1].close - backtestData[0].close) / backtestData[0].close) * 100;
+      
+      const profitableTrades = trades.filter(t => t.type.includes('SELL') && t.pl > 0).length;
+      const losingTrades = trades.filter(t => t.type.includes('SELL') && t.pl < 0).length;
+      const totalTrades = profitableTrades + losingTrades;
+      const winRate = totalTrades > 0 ? (profitableTrades / totalTrades) * 100 : 0;
+      
+      const avgProfit = trades.filter(t => t.type.includes('SELL') && t.pl > 0).reduce((sum, t) => sum + t.pl, 0) / (profitableTrades || 1);
+      const avgLoss = trades.filter(t => t.type.includes('SELL') && t.pl < 0).reduce((sum, t) => sum + t.pl, 0) / (losingTrades || 1);
+      
+      // Display results
+      displayBacktestResults({
+        initialCapital,
+        finalCapital,
+        totalReturn,
+        buyHoldReturn,
+        totalTrades,
+        profitableTrades,
+        losingTrades,
+        winRate,
+        avgProfit,
+        avgLoss,
+        trades,
+        equityCurve
+      });
+    });
+    
+    function displayBacktestResults(results) {
+      document.getElementById('backtestResults').style.display = 'block';
+      
+      // Display metrics
+      const metricsHTML = `
+        <div class="metric-card ${results.totalReturn >= 0 ? 'positive' : 'negative'}">
+          <div class="metric-label">Total Return</div>
+          <div class="metric-value ${results.totalReturn >= 0 ? 'positive' : 'negative'}">${results.totalReturn.toFixed(2)}%</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Final Capital</div>
+          <div class="metric-value">₹${results.finalCapital.toFixed(2)}</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Buy & Hold Return</div>
+          <div class="metric-value ${results.buyHoldReturn >= 0 ? 'positive' : 'negative'}">${results.buyHoldReturn.toFixed(2)}%</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Total Trades</div>
+          <div class="metric-value">${results.totalTrades}</div>
+        </div>
+        <div class="metric-card positive">
+          <div class="metric-label">Winning Trades</div>
+          <div class="metric-value">${results.profitableTrades}</div>
+        </div>
+        <div class="metric-card negative">
+          <div class="metric-label">Losing Trades</div>
+          <div class="metric-value">${results.losingTrades}</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Win Rate</div>
+          <div class="metric-value">${results.winRate.toFixed(1)}%</div>
+        </div>
+        <div class="metric-card positive">
+          <div class="metric-label">Avg Profit</div>
+          <div class="metric-value">₹${results.avgProfit.toFixed(2)}</div>
+        </div>
+        <div class="metric-card negative">
+          <div class="metric-label">Avg Loss</div>
+          <div class="metric-value">₹${Math.abs(results.avgLoss).toFixed(2)}</div>
+        </div>
+      `;
+      document.getElementById('metricsGrid').innerHTML = metricsHTML;
+      
+      // Draw equity curve
+      const canvas = document.getElementById('equityCurve');
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      
+      const padding = { top: 20, right: 80, bottom: 40, left: 60 };
+      const chartWidth = canvas.width - padding.left - padding.right;
+      const chartHeight = canvas.height - padding.top - padding.bottom;
+      
+      const maxEquity = Math.max(...results.equityCurve);
+      const minEquity = Math.min(...results.equityCurve);
+      const equityRange = maxEquity - minEquity;
+      
+      const getY = (value) => {
+        return padding.top + chartHeight - ((value - minEquity) / equityRange) * chartHeight;
+      };
+      
+      // Draw grid
+      ctx.strokeStyle = '#e0e0e0';
+      ctx.lineWidth = 1;
+      for (let i = 0; i <= 5; i++) {
+        const value = minEquity + (equityRange * i / 5);
+        const y = getY(value);
+        ctx.beginPath();
+        ctx.moveTo(padding.left, y);
+        ctx.lineTo(canvas.width - padding.right, y);
+        ctx.stroke();
+        
+        ctx.fillStyle = '#666';
+        ctx.font = '12px Arial';
+        ctx.textAlign = 'right';
+        ctx.fillText('₹' + (value/1000).toFixed(1) + 'K', padding.left - 10, y + 4);
+      }
+      
+      // Draw equity curve
+      ctx.strokeStyle = '#2196F3';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      results.equityCurve.forEach((equity, i) => {
+        const x = padding.left + (i / results.equityCurve.length) * chartWidth;
+        const y = getY(equity);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+      
+      // Draw initial capital line
+      ctx.strokeStyle = '#888';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([5, 5]);
+      const initialY = getY(results.initialCapital);
+      ctx.beginPath();
+      ctx.moveTo(padding.left, initialY);
+      ctx.lineTo(canvas.width - padding.right, initialY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      
+      // Labels
+      ctx.fillStyle = '#333';
+      ctx.font = 'bold 14px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText('Equity Curve Over Time', canvas.width / 2, padding.top - 5);
+      
+      // Display trades
+      const tradesHTML = results.trades.map((trade, idx) => `
+        <tr>
+          <td>${idx + 1}</td>
+          <td><strong>${trade.type}</strong></td>
+          <td>${trade.date.toLocaleDateString('en-GB')}</td>
+          <td>₹${trade.price.toFixed(2)}</td>
+          <td>${trade.quantity}</td>
+          <td>₹${trade.value.toFixed(2)}</td>
+          <td class="${trade.pl >= 0 ? 'profit' : 'loss'}">${trade.pl >= 0 ? '+' : ''}₹${trade.pl.toFixed(2)}</td>
+          <td class="${trade.plPercent >= 0 ? 'profit' : 'loss'}">${trade.plPercent >= 0 ? '+' : ''}${trade.plPercent.toFixed(2)}%</td>
+          <td>₹${trade.capital.toFixed(2)}</td>
+        </tr>
+      `).join('');
+      document.getElementById('tradesTableBody').innerHTML = tradesHTML;
+      
+      // Scroll to results
+      document.getElementById('backtestResults').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
 
     // Encryption/Decryption functions matching encrypt_keys.py
     const PASSPHRASE = "default_salt_2024";
