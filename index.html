@@ -325,6 +325,41 @@
     let hoveredCandle = null;
     let chartMetrics = null;
     
+    // Calculate Moving Average
+    function calculateMA(data, period) {
+      const ma = [];
+      for (let i = 0; i < data.length; i++) {
+        if (i < period - 1) {
+          ma.push(null);
+        } else {
+          let sum = 0;
+          for (let j = 0; j < period; j++) {
+            sum += data[i - j].close;
+          }
+          ma.push(sum / period);
+        }
+      }
+      return ma;
+    }
+    
+    // Detect crossovers
+    function detectCrossovers(ma21, ma50) {
+      const signals = [];
+      for (let i = 1; i < ma21.length; i++) {
+        if (ma21[i] !== null && ma50[i] !== null && ma21[i-1] !== null && ma50[i-1] !== null) {
+          // Bullish crossover - 21 MA crosses above 50 MA
+          if (ma21[i-1] <= ma50[i-1] && ma21[i] > ma50[i]) {
+            signals.push({ index: i, type: 'buy' });
+          }
+          // Bearish crossover - 21 MA crosses below 50 MA
+          else if (ma21[i-1] >= ma50[i-1] && ma21[i] < ma50[i]) {
+            signals.push({ index: i, type: 'sell' });
+          }
+        }
+      }
+      return signals;
+    }
+    
     // Candlestick chart drawing function
     function drawCandlestickChart(data, hoverIndex = null) {
       const canvas = document.getElementById('candlestickChart');
@@ -349,10 +384,27 @@
       // Display last 100 candles for better visibility
       const displayData = data.slice(-100);
       
-      // Calculate price range
+      // Calculate moving averages for displayed data
+      const fullMA21 = calculateMA(data, 21);
+      const fullMA50 = calculateMA(data, 50);
+      const ma21 = fullMA21.slice(-100);
+      const ma50 = fullMA50.slice(-100);
+      
+      // Detect crossovers in full data
+      const allSignals = detectCrossovers(fullMA21, fullMA50);
+      // Filter signals to only show those in display range
+      const startIndex = data.length - 100;
+      const signals = allSignals.filter(s => s.index >= startIndex).map(s => ({
+        ...s,
+        index: s.index - startIndex
+      }));
+      
+      // Calculate price range including MA values
       const prices = displayData.flatMap(d => [d.high, d.low]);
-      const maxPrice = Math.max(...prices);
-      const minPrice = Math.min(...prices);
+      const maValues = [...ma21, ...ma50].filter(v => v !== null);
+      const allValues = [...prices, ...maValues];
+      const maxPrice = Math.max(...allValues);
+      const minPrice = Math.min(...allValues);
       const priceRange = maxPrice - minPrice;
       const priceMargin = priceRange * 0.1;
       
@@ -425,6 +477,91 @@
         ctx.fillRect(x - candleWidth/2, bodyTop, candleWidth, bodyHeight);
       });
       
+      // Draw Moving Averages
+      // 21 MA (Blue line)
+      ctx.strokeStyle = '#2196F3';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      let firstPoint = true;
+      displayData.forEach((candle, i) => {
+        if (ma21[i] !== null) {
+          const x = padding.left + (i * candleSpacing) + (candleSpacing / 2);
+          const y = getY(ma21[i]);
+          if (firstPoint) {
+            ctx.moveTo(x, y);
+            firstPoint = false;
+          } else {
+            ctx.lineTo(x, y);
+          }
+        }
+      });
+      ctx.stroke();
+      
+      // 50 MA (Red line)
+      ctx.strokeStyle = '#EF5350';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      firstPoint = true;
+      displayData.forEach((candle, i) => {
+        if (ma50[i] !== null) {
+          const x = padding.left + (i * candleSpacing) + (candleSpacing / 2);
+          const y = getY(ma50[i]);
+          if (firstPoint) {
+            ctx.moveTo(x, y);
+            firstPoint = false;
+          } else {
+            ctx.lineTo(x, y);
+          }
+        }
+      });
+      ctx.stroke();
+      
+      // Draw crossover signals
+      signals.forEach(signal => {
+        const x = padding.left + (signal.index * candleSpacing) + (candleSpacing / 2);
+        const candle = displayData[signal.index];
+        const y = getY(candle.low) + 20;
+        
+        if (signal.type === 'buy') {
+          // Draw buy arrow (up triangle)
+          ctx.fillStyle = '#26a69a';
+          ctx.beginPath();
+          ctx.moveTo(x, y);
+          ctx.lineTo(x - 8, y + 12);
+          ctx.lineTo(x + 8, y + 12);
+          ctx.closePath();
+          ctx.fill();
+          
+          // Label
+          ctx.fillStyle = '#26a69a';
+          ctx.font = 'bold 11px Arial';
+          ctx.textAlign = 'center';
+          ctx.fillText('BUY', x, y + 26);
+        } else {
+          // Draw sell arrow (down triangle)
+          ctx.fillStyle = '#ef5350';
+          ctx.beginPath();
+          ctx.moveTo(x, y - 12);
+          ctx.lineTo(x - 8, y);
+          ctx.lineTo(x + 8, y);
+          ctx.closePath();
+          ctx.fill();
+          
+          // Label
+          ctx.fillStyle = '#ef5350';
+          ctx.font = 'bold 11px Arial';
+          ctx.textAlign = 'center';
+          ctx.fillText('SELL', x, y - 16);
+        }
+        
+        // Draw circle around crossover point
+        ctx.strokeStyle = signal.type === 'buy' ? '#26a69a' : '#ef5350';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(x, getY(candle.close), 8, 0, Math.PI * 2);
+        ctx.stroke();
+      });
+      
       // Draw date labels on X-axis
       ctx.fillStyle = '#b2b5be';
       ctx.font = '11px Arial';
@@ -484,6 +621,40 @@
       ctx.textAlign = 'right';
       ctx.fillText('🟩 Bullish (Close ≥ Open)  🟥 Bearish (Close < Open)', width - padding.right, 25);
       
+      // Draw MA legend and strategy
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#2196F3';
+      ctx.font = 'bold 13px Arial';
+      ctx.fillText('━━ 21 MA', padding.left + 10, 25);
+      
+      ctx.fillStyle = '#EF5350';
+      ctx.fillText('━━ 50 MA', padding.left + 100, 25);
+      
+      // Strategy box
+      const strategyBoxX = padding.left + chartWidth - 320;
+      const strategyBoxY = padding.top + 20;
+      const strategyBoxWidth = 300;
+      const strategyBoxHeight = 80;
+      
+      // Draw semi-transparent background
+      ctx.fillStyle = 'rgba(30, 34, 45, 0.9)';
+      ctx.fillRect(strategyBoxX, strategyBoxY, strategyBoxWidth, strategyBoxHeight);
+      ctx.strokeStyle = '#4a4e59';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(strategyBoxX, strategyBoxY, strategyBoxWidth, strategyBoxHeight);
+      
+      // Strategy text
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 14px Arial';
+      ctx.fillText('MA CROSSOVER STRATEGY', strategyBoxX + 10, strategyBoxY + 20);
+      
+      ctx.font = '13px Arial';
+      ctx.fillStyle = '#26a69a';
+      ctx.fillText('▲ BUY = 21 MA crosses above 50 MA', strategyBoxX + 10, strategyBoxY + 42);
+      
+      ctx.fillStyle = '#ef5350';
+      ctx.fillText('▼ SELL = 21 MA crosses below 50 MA', strategyBoxX + 10, strategyBoxY + 62);
+      
       // Draw hover tooltip
       if (hoverIndex !== null && hoverIndex >= 0 && hoverIndex < displayData.length) {
         const candle = displayData[hoverIndex];
@@ -500,8 +671,8 @@
         ctx.setLineDash([]);
         
         // Draw tooltip box
-        const tooltipWidth = 180;
-        const tooltipHeight = 120;
+        const tooltipWidth = 200;
+        const tooltipHeight = 155;
         let tooltipX = x + 15;
         let tooltipY = padding.top + 50;
         
@@ -533,6 +704,14 @@
           { label: 'Close:', value: '₹' + candle.close.toFixed(2), color: '#ffffff' },
           { label: 'Volume:', value: (candle.volume / 1000000).toFixed(2) + 'M', color: '#b2b5be' }
         ];
+        
+        // Add MA values to tooltip
+        if (ma21[hoverIndex] !== null) {
+          lines.push({ label: '21 MA:', value: '₹' + ma21[hoverIndex].toFixed(2), color: '#2196F3' });
+        }
+        if (ma50[hoverIndex] !== null) {
+          lines.push({ label: '50 MA:', value: '₹' + ma50[hoverIndex].toFixed(2), color: '#EF5350' });
+        }
         
         lines.forEach((line, i) => {
           ctx.fillStyle = '#b2b5be';
