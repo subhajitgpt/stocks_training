@@ -4,6 +4,89 @@
   <title>Time Series Analysis in Browser (Pyodide)</title>
   <script src="https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js"></script>
   <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    .tabs {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 20px;
+      border-bottom: 2px solid #ddd;
+    }
+    .tab {
+      padding: 12px 24px;
+      background: #f0f0f0;
+      border: none;
+      border-radius: 8px 8px 0 0;
+      cursor: pointer;
+      font-size: 16px;
+      font-weight: 500;
+      transition: all 0.3s;
+    }
+    .tab:hover {
+      background: #e0e0e0;
+    }
+    .tab.active {
+      background: white;
+      color: #007bff;
+      border-bottom: 2px solid #007bff;
+    }
+    .tab-content {
+      display: none;
+      background: white;
+      padding: 20px;
+      border-radius: 0 8px 8px 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    .tab-content.active {
+      display: block;
+    }
+    #chartContainer {
+      width: 100%;
+      height: 600px;
+      position: relative;
+      background: #1e222d;
+      border-radius: 8px;
+    }
+    #candlestickChart {
+      width: 100%;
+      height: 100%;
+    }
+    .stock-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 16px;
+      background: #1e222d;
+      color: white;
+      border-radius: 8px 8px 0 0;
+      margin: -20px -20px 20px -20px;
+    }
+    .stock-info h2 {
+      margin: 0 0 8px 0;
+      font-size: 20px;
+      color: white;
+    }
+    .stock-info .price-data {
+      display: flex;
+      gap: 16px;
+      font-size: 14px;
+      color: #b2b5be;
+    }
+    .price-data span {
+      display: flex;
+      gap: 4px;
+    }
+    .price-change {
+      color: #26a69a;
+      font-weight: bold;
+    }
+    .price-change.negative {
+      color: #ef5350;
+    }
     #aiPanel {
       position: fixed;
       bottom: 20px;
@@ -159,12 +242,41 @@
   </style>
 </head>
 <body>
-  <h2>📈 CSV Time Series Analysis Tool (Pyodide)</h2>
-  <p><b>Upload a CSV file with columns:</b> <code>Date, Close</code> (and optionally Open, High, Low, Volume)</p>
-  <input type="file" id="fileInput" accept=".csv"><br>
-  <button id="analyzeBtn" style="margin: 10px 0; padding: 10px 20px; font-size: 16px; cursor: pointer; background-color: #007bff; color: white; border: none; border-radius: 4px;" disabled>Analyze</button>
-  <div id="output"></div>
-  <div id="charts"></div>
+  <!-- Tabs -->
+  <div class="tabs">
+    <button class="tab active" onclick="switchTab('analysis')">📊 Analysis</button>
+    <button class="tab" onclick="switchTab('chart')">📈 Candlestick Chart</button>
+  </div>
+
+  <!-- Tab 1: Analysis -->
+  <div id="analysisTab" class="tab-content active">
+    <h2>📈 Time Series Analysis Tool</h2>
+    <p><b>Upload a CSV file with columns:</b> <code>Date, Close</code> (and optionally Open, High, Low, Volume)</p>
+    <input type="file" id="fileInput" accept=".csv"><br>
+    <button id="analyzeBtn" style="margin: 10px 0; padding: 10px 20px; font-size: 16px; cursor: pointer; background-color: #007bff; color: white; border: none; border-radius: 4px;" disabled>Analyze</button>
+    <div id="output"></div>
+    <div id="charts"></div>
+  </div>
+
+  <!-- Tab 2: Candlestick Chart -->
+  <div id="chartTab" class="tab-content">
+    <div class="stock-header">
+      <div class="stock-info">
+        <h2 id="stockTitle">Stock Data · 1D · NSE</h2>
+        <div class="price-data">
+          <span>O <span id="openPrice">--</span></span>
+          <span>H <span id="highPrice">--</span></span>
+          <span>L <span id="lowPrice">--</span></span>
+          <span>C <span id="closePrice">--</span></span>
+          <span class="price-change" id="priceChange">-- (--)</span>
+        </div>
+      </div>
+    </div>
+    <input type="file" id="fileInputChart" accept=".csv" style="margin-bottom: 16px;">
+    <div id="chartContainer">
+      <canvas id="candlestickChart"></canvas>
+    </div>
+  </div>
 
   <!-- AI Chat Panel -->
   <div id="aiPanel">
@@ -191,6 +303,233 @@
   </div>
 
   <script type="text/javascript">
+    // Tab switching functionality
+    function switchTab(tabName) {
+      const tabs = document.querySelectorAll('.tab');
+      const tabContents = document.querySelectorAll('.tab-content');
+      
+      tabs.forEach(tab => tab.classList.remove('active'));
+      tabContents.forEach(content => content.classList.remove('active'));
+      
+      if (tabName === 'analysis') {
+        document.getElementById('analysisTab').classList.add('active');
+        tabs[0].classList.add('active');
+      } else if (tabName === 'chart') {
+        document.getElementById('chartTab').classList.add('active');
+        tabs[1].classList.add('active');
+      }
+    }
+
+    // Candlestick chart variables
+    let chartData = [];
+    
+    // Candlestick chart drawing function
+    function drawCandlestickChart(data) {
+      const canvas = document.getElementById('candlestickChart');
+      const ctx = canvas.getContext('2d');
+      
+      // Set canvas size
+      canvas.width = canvas.offsetWidth;
+      canvas.height = canvas.offsetHeight;
+      
+      const width = canvas.width;
+      const height = canvas.height;
+      const padding = { top: 40, right: 80, bottom: 80, left: 60 };
+      const chartWidth = width - padding.left - padding.right;
+      const chartHeight = height - padding.top - padding.bottom;
+      
+      // Clear canvas
+      ctx.fillStyle = '#1e222d';
+      ctx.fillRect(0, 0, width, height);
+      
+      if (data.length === 0) return;
+      
+      // Display last 100 candles for better visibility
+      const displayData = data.slice(-100);
+      
+      // Calculate price range
+      const prices = displayData.flatMap(d => [d.high, d.low]);
+      const maxPrice = Math.max(...prices);
+      const minPrice = Math.min(...prices);
+      const priceRange = maxPrice - minPrice;
+      const priceMargin = priceRange * 0.1;
+      
+      // Helper functions
+      const getY = (price) => {
+        return padding.top + chartHeight - ((price - minPrice + priceMargin) / (priceRange + 2 * priceMargin)) * chartHeight;
+      };
+      
+      const candleWidth = Math.max(2, chartWidth / displayData.length * 0.7);
+      const candleSpacing = chartWidth / displayData.length;
+      
+      // Draw "Price" label on Y-axis
+      ctx.save();
+      ctx.fillStyle = '#b2b5be';
+      ctx.font = 'bold 14px Arial';
+      ctx.textAlign = 'center';
+      ctx.translate(20, padding.top + chartHeight / 2);
+      ctx.rotate(-Math.PI / 2);
+      ctx.fillText('Price (₹)', 0, 0);
+      ctx.restore();
+      
+      // Draw grid lines with price labels
+      ctx.strokeStyle = '#2a2e39';
+      ctx.lineWidth = 1;
+      for (let i = 0; i <= 5; i++) {
+        const price = minPrice + (priceRange * i / 5);
+        const y = getY(price);
+        ctx.beginPath();
+        ctx.moveTo(padding.left, y);
+        ctx.lineTo(width - padding.right, y);
+        ctx.stroke();
+        
+        // Price labels on right
+        ctx.fillStyle = '#b2b5be';
+        ctx.font = '12px Arial';
+        ctx.textAlign = 'left';
+        ctx.fillText('₹' + price.toFixed(2), width - padding.right + 5, y + 4);
+      }
+      
+      // Draw candlesticks
+      displayData.forEach((candle, i) => {
+        const x = padding.left + (i * candleSpacing) + (candleSpacing / 2);
+        const isGreen = candle.close >= candle.open;
+        
+        // Wick (high-low line)
+        ctx.strokeStyle = isGreen ? '#26a69a' : '#ef5350';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(x, getY(candle.high));
+        ctx.lineTo(x, getY(candle.low));
+        ctx.stroke();
+        
+        // Body (open-close rectangle)
+        const bodyTop = Math.min(getY(candle.open), getY(candle.close));
+        const bodyBottom = Math.max(getY(candle.open), getY(candle.close));
+        const bodyHeight = Math.max(1, bodyBottom - bodyTop);
+        
+        ctx.fillStyle = isGreen ? '#26a69a' : '#ef5350';
+        ctx.fillRect(x - candleWidth/2, bodyTop, candleWidth, bodyHeight);
+      });
+      
+      // Draw date labels on X-axis
+      ctx.fillStyle = '#b2b5be';
+      ctx.font = '11px Arial';
+      ctx.textAlign = 'center';
+      
+      // Show date labels at intervals
+      const labelInterval = Math.max(1, Math.floor(displayData.length / 8));
+      for (let i = 0; i < displayData.length; i += labelInterval) {
+        const x = padding.left + (i * candleSpacing) + (candleSpacing / 2);
+        const date = displayData[i].date;
+        const dateStr = date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' });
+        
+        // Draw tick mark
+        ctx.strokeStyle = '#2a2e39';
+        ctx.beginPath();
+        ctx.moveTo(x, padding.top + chartHeight);
+        ctx.lineTo(x, padding.top + chartHeight + 5);
+        ctx.stroke();
+        
+        // Draw date label
+        ctx.save();
+        ctx.translate(x, padding.top + chartHeight + 20);
+        ctx.rotate(-Math.PI / 4);
+        ctx.fillText(dateStr, 0, 0);
+        ctx.restore();
+      }
+      
+      // Draw "Date" label on X-axis
+      ctx.fillStyle = '#b2b5be';
+      ctx.font = 'bold 14px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText('Date', padding.left + chartWidth / 2, height - 10);
+      
+      // Draw volume bars at bottom
+      const volumeHeight = 60;
+      const volumeTop = padding.top + chartHeight + 10;
+      const maxVolume = Math.max(...displayData.map(d => d.volume));
+      
+      displayData.forEach((candle, i) => {
+        const x = padding.left + (i * candleSpacing) + (candleSpacing / 2);
+        const isGreen = candle.close >= candle.open;
+        const barHeight = (candle.volume / maxVolume) * volumeHeight;
+        
+        ctx.fillStyle = isGreen ? 'rgba(38, 166, 154, 0.3)' : 'rgba(239, 83, 80, 0.3)';
+        ctx.fillRect(x - candleWidth/2, volumeTop + volumeHeight - barHeight, candleWidth, barHeight);
+      });
+      
+      // Volume label
+      ctx.fillStyle = '#b2b5be';
+      ctx.font = 'bold 12px Arial';
+      ctx.textAlign = 'left';
+      ctx.fillText('Volume: ' + (displayData[displayData.length-1].volume / 1000000).toFixed(2) + 'M', padding.left, volumeTop - 5);
+      
+      // Draw legend
+      ctx.fillStyle = '#b2b5be';
+      ctx.font = '12px Arial';
+      ctx.textAlign = 'right';
+      ctx.fillText('🟩 Bullish (Close ≥ Open)  🟥 Bearish (Close < Open)', width - padding.right, 25);
+    }
+    
+    // Load CSV for candlestick chart
+    document.getElementById('fileInputChart').addEventListener('change', async (evt) => {
+      const file = evt.target.files[0];
+      if (!file) return;
+      
+      const text = await file.text();
+      const lines = text.trim().split('\n');
+      const headers = lines[0].split(',').map(h => h.trim());
+      
+      chartData = [];
+      for (let i = 1; i < lines.length; i++) {
+        const values = lines[i].split(',');
+        const row = {};
+        headers.forEach((h, idx) => {
+          row[h] = values[idx];
+        });
+        
+        // Parse date formats like "17/05/2022"
+        const dateParts = row['Date'].split('/');
+        const date = new Date(dateParts[2], dateParts[1] - 1, dateParts[0]);
+        
+        chartData.push({
+          date: date,
+          open: parseFloat(row['Open']),
+          high: parseFloat(row['High']),
+          low: parseFloat(row['Low']),
+          close: parseFloat(row['Close']),
+          volume: parseFloat(row['Volume'])
+        });
+      }
+      
+      // Update stock header with latest data
+      if (chartData.length > 0) {
+        const latest = chartData[chartData.length - 1];
+        const previous = chartData[chartData.length - 2];
+        const change = latest.close - previous.close;
+        const changePercent = (change / previous.close) * 100;
+        
+        document.getElementById('openPrice').textContent = latest.open.toFixed(2);
+        document.getElementById('highPrice').textContent = latest.high.toFixed(2);
+        document.getElementById('lowPrice').textContent = latest.low.toFixed(2);
+        document.getElementById('closePrice').textContent = latest.close.toFixed(2);
+        
+        const priceChangeEl = document.getElementById('priceChange');
+        priceChangeEl.textContent = `${change >= 0 ? '+' : ''}${change.toFixed(2)} (${change >= 0 ? '+' : ''}${changePercent.toFixed(2)}%)`;
+        priceChangeEl.className = change >= 0 ? 'price-change' : 'price-change negative';
+      }
+      
+      drawCandlestickChart(chartData);
+    });
+    
+    // Redraw chart on window resize
+    window.addEventListener('resize', () => {
+      if (chartData.length > 0) {
+        drawCandlestickChart(chartData);
+      }
+    });
+
     // Encryption/Decryption functions matching encrypt_keys.py
     const PASSPHRASE = "default_salt_2024";
     
