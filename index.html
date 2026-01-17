@@ -327,6 +327,130 @@
       });
     }
     
+    async function getAIRecommendation() {
+      if (!OPENAI_KEY_ENCRYPTED) {
+        addMessage("⚠️ OpenAI API key not configured.", 'assistant');
+        return;
+      }
+      
+      const recommendationPrompt = `Based on the following stock analysis data and technical indicators, provide a brief investment recommendation and key insights:\n\n${contextData}\n\nConsider the RSI, moving averages, volatility, and overall trend. Provide: 1) Market sentiment, 2) Key technical signals, 3) Risk assessment, 4) Short-term outlook.`;
+      
+      conversationHistory.push({ role: 'user', content: recommendationPrompt });
+      
+      // Limit history
+      if (conversationHistory.length > MAX_HISTORY_MESSAGES) {
+        conversationHistory = conversationHistory.slice(-MAX_HISTORY_MESSAGES);
+      }
+      
+      addMessage("🤖 Analyzing data and generating recommendation...", 'assistant');
+      addTypingIndicator();
+      
+      try {
+        const apiKey = await decryptKey(OPENAI_KEY_ENCRYPTED);
+        currentAbortController = new AbortController();
+        
+        const messages = [{ role: 'system', content: 'You are a financial analyst assistant. Provide clear, actionable insights based on technical analysis data.' }, ...conversationHistory];
+        
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({
+            model: 'gpt-4o',
+            messages: messages,
+            temperature: 0.7,
+            max_tokens: 800
+          }),
+          signal: currentAbortController.signal
+        });
+        
+        if (!response.ok) {
+          throw new Error(`API Error: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        const reply = data.choices[0].message.content;
+        
+        conversationHistory.push({ role: 'assistant', content: reply });
+        removeTypingIndicator();
+        await typeMessage(reply);
+        
+      } catch (error) {
+        removeTypingIndicator();
+        if (error.name === 'AbortError') {
+          addMessage('⚠️ Request stopped by user.', 'assistant');
+        } else {
+          addMessage(`⚠️ Error: ${error.message}`, 'assistant');
+        }
+      } finally {
+        currentAbortController = null;
+      }
+    }
+    
+    async function getAIRecommendation() {
+      if (!OPENAI_KEY_ENCRYPTED) {
+        addMessage("⚠️ OpenAI API key not configured.", 'assistant');
+        return;
+      }
+      
+      const recommendationPrompt = `Based on the following stock analysis data and technical indicators, provide a brief investment recommendation and key insights:\n\n${contextData}\n\nConsider the RSI, moving averages, volatility, and overall trend. Provide: 1) Market sentiment, 2) Key technical signals, 3) Risk assessment, 4) Short-term outlook.`;
+      
+      conversationHistory.push({ role: 'user', content: recommendationPrompt });
+      
+      // Limit history
+      if (conversationHistory.length > MAX_HISTORY_MESSAGES) {
+        conversationHistory = conversationHistory.slice(-MAX_HISTORY_MESSAGES);
+      }
+      
+      addMessage("🤖 Analyzing data and generating recommendation...", 'assistant');
+      addTypingIndicator();
+      
+      try {
+        const apiKey = await decryptKey(OPENAI_KEY_ENCRYPTED);
+        currentAbortController = new AbortController();
+        
+        const messages = [{ role: 'system', content: 'You are a financial analyst assistant. Provide clear, actionable insights based on technical analysis data.' }, ...conversationHistory];
+        
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({
+            model: 'gpt-4o',
+            messages: messages,
+            temperature: 0.7,
+            max_tokens: 800
+          }),
+          signal: currentAbortController.signal
+        });
+        
+        if (!response.ok) {
+          throw new Error(`API Error: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        const reply = data.choices[0].message.content;
+        
+        conversationHistory.push({ role: 'assistant', content: reply });
+        removeTypingIndicator();
+        await typeMessage(reply);
+        
+      } catch (error) {
+        removeTypingIndicator();
+        if (error.name === 'AbortError') {
+          addMessage('⚠️ Request stopped by user.', 'assistant');
+        } else {
+          addMessage(`⚠️ Error: ${error.message}`, 'assistant');
+        }
+      } finally {
+        currentAbortController = null;
+      }
+    }
+    
     async function sendMessage() {
       const message = aiInput.value.trim();
       if (!message && !uploadedImageBase64) return;
@@ -511,160 +635,219 @@
         pyodide.FS.writeFile("uploaded.csv", fileContent);
 
       await pyodide.runPythonAsync(`
-        import pandas as pd
-        import matplotlib.pyplot as plt
-        import numpy as np
-        import io, base64
-        from js import document
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
+import io, base64
+from js import document
 
-        df = pd.read_csv("uploaded.csv")
+df = pd.read_csv("uploaded.csv")
 
-        # Clean data - handle various column name formats
-        df.columns = df.columns.str.strip()
-        
-        # Replace spaces with underscores in column names
-        df.columns = df.columns.str.replace(' ', '_', regex=False)
-        
-        # Handle duplicate column names by adding suffixes
-        cols = pd.Series(df.columns)
-        for dup in cols[cols.duplicated()].unique():
-            cols[cols[cols == dup].index.values.tolist()] = [dup + '_' + str(i) if i != 0 else dup for i in range(sum(cols == dup))]
-        df.columns = cols
-        
-        # Create a mapping for common column name variations
-        column_mapping = {}
-        for col in df.columns:
-            col_lower = col.lower()
-            if col_lower in ['date', 'timestamp', 'time']:
-                column_mapping[col] = 'Date'
-            elif col_lower in ['close', 'closing_price', 'adj close', 'adj_close']:
-                column_mapping[col] = 'Close'
-            elif col_lower in ['open', 'opening_price']:
-                column_mapping[col] = 'Open'
-            elif col_lower in ['high', 'high_price']:
-                column_mapping[col] = 'High'
-            elif col_lower in ['low', 'low_price']:
-                column_mapping[col] = 'Low'
-            elif col_lower in ['volume', 'vol', 'trading_volume']:
-                column_mapping[col] = 'Volume'
-        
-        df = df.rename(columns=column_mapping)
-        
-        # Handle duplicate columns after mapping (keep first occurrence)
-        df = df.loc[:, ~df.columns.duplicated(keep='first')]
-        
-        # Check for required columns
-        if 'Date' not in df.columns:
-            raise ValueError(f"CSV must have a date column. Found columns: {list(df.columns)}")
-        
-        if 'Close' not in df.columns:
-            raise ValueError(f"CSV must have a 'Close' price column. Found columns: {list(df.columns)}")
-        
-        # Defensive: Clean all numeric columns - remove commas and convert to numeric
-        for col in df.columns:
-            if col != 'Date':
-                # Ensure we're working with a Series, convert to string, remove commas, convert to numeric
-                series_data = df[col] if isinstance(df[col], pd.Series) else df[col].iloc[:, 0]
-                series_data = series_data.astype(str).str.replace(',', '', regex=False)
-                df[col] = pd.to_numeric(series_data, errors='coerce')
-        
-        df['Date'] = pd.to_datetime(df['Date'], errors='coerce', dayfirst=True)
-        df = df.dropna(subset=['Date', 'Close'])
-        df = df.sort_values('Date')
-        df.set_index('Date', inplace=True)
+# Clean data - handle various column name formats
+df.columns = df.columns.str.strip()
 
-        document.getElementById("output").innerHTML = f"<p><b>📅 Date Range:</b> {df.index.min().date()} to {df.index.max().date()}</p><p><b>🔢 Rows:</b> {len(df)}</p><p><b>🧾 Columns:</b> {', '.join(df.columns)}</p>"
+# Replace spaces with underscores in column names
+df.columns = df.columns.str.replace(' ', '_', regex=False)
 
-        # Add return + volatility
-        df['Return'] = df['Close'].pct_change()
-        df['Volatility'] = df['Return'].rolling(30).std() * 100
-        df['MA_50'] = df['Close'].rolling(50).mean()
-        df['MA_200'] = df['Close'].rolling(200).mean()
+# Handle duplicate column names by adding suffixes
+cols = pd.Series(df.columns)
+for dup in cols[cols.duplicated()].unique():
+    cols[cols[cols == dup].index.values.tolist()] = [dup + '_' + str(i) if i != 0 else dup for i in range(sum(cols == dup))]
+df.columns = cols
 
-        def show_plot(title):
-            buf = io.BytesIO()
-            plt.tight_layout()
-            plt.savefig(buf, format='png', bbox_inches='tight')
-            plt.close()
-            img_str = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode('utf-8')
-            document.getElementById("charts").innerHTML += f"<h4>{title}</h4><img src='{img_str}' style='max-width:100%; height:auto;'><br>"
+# Create a mapping for common column name variations
+column_mapping = {}
+for col in df.columns:
+    col_lower = col.lower()
+    if col_lower in ['date', 'timestamp', 'time']:
+        column_mapping[col] = 'Date'
+    elif col_lower in ['close', 'closing_price', 'adj close', 'adj_close']:
+        column_mapping[col] = 'Close'
+    elif col_lower in ['open', 'opening_price']:
+        column_mapping[col] = 'Open'
+    elif col_lower in ['high', 'high_price']:
+        column_mapping[col] = 'High'
+    elif col_lower in ['low', 'low_price']:
+        column_mapping[col] = 'Low'
+    elif col_lower in ['volume', 'vol', 'trading_volume']:
+        column_mapping[col] = 'Volume'
 
-        # Trend
-        plt.figure(figsize=(10,4))
-        df['Close'].plot(color='black')
-        plt.title("Trend: Close Price")
-        show_plot("Trend: Close Price")
+df = df.rename(columns=column_mapping)
 
-        # Volatility
-        plt.figure(figsize=(10,4))
-        df['Volatility'].plot(color='black')
-        plt.title("30-Day Rolling Volatility (%)")
-        show_plot("30-Day Rolling Volatility (%)")
+# Handle duplicate columns after mapping (keep first occurrence)
+df = df.loc[:, ~df.columns.duplicated(keep='first')]
 
-        # Moving Averages
-        plt.figure(figsize=(10,4))
-        df[['Close', 'MA_50', 'MA_200']].plot()
-        plt.title("Moving Averages (50 & 200)")
-        show_plot("Moving Averages (50 & 200)")
+# Check for required columns
+if 'Date' not in df.columns:
+    raise ValueError(f"CSV must have a date column. Found columns: {list(df.columns)}")
 
-        # Yearly returns
-        yr = df['Close'].resample('Y').last().pct_change()*100
-        plt.figure(figsize=(10,4))
-        yr.dropna().plot(kind='bar', color='black')
-        plt.title("Yearly Returns (%)")
-        show_plot("Yearly Returns (%)")
+if 'Close' not in df.columns:
+    raise ValueError(f"CSV must have a 'Close' price column. Found columns: {list(df.columns)}")
 
-        # Monthly return heatmap
-        monthly = df['Close'].resample('M').last().pct_change() * 100
-        mdf = monthly.to_frame(name="Return")
-        mdf['Year'] = mdf.index.year
-        mdf['Month'] = mdf.index.month_name()
-        pivot = mdf.pivot(index="Year", columns="Month", values="Return")
-        month_order = ['January','February','March','April','May','June','July','August','September','October','November','December']
-        pivot = pivot.reindex(columns=month_order)
-        
-        heatmap_array = pivot.to_numpy(dtype=float)
-        finite_mask = np.isfinite(heatmap_array)
-        max_abs = np.nanmax(np.abs(heatmap_array[finite_mask])) if finite_mask.any() else 1
-        if not np.isfinite(max_abs) or max_abs == 0:
-            max_abs = 1
-        heatmap_masked = np.ma.masked_invalid(heatmap_array)
-        
-        plt.figure(figsize=(12,5))
-        fig, ax = plt.subplots(figsize=(12, 5))
-        im = ax.imshow(
-            heatmap_masked,
-            cmap="RdYlGn",
-            aspect="auto",
-            vmin=-max_abs,
-            vmax=max_abs,
-        )
-        ax.set_xticks(range(len(pivot.columns)))
-        ax.set_xticklabels(pivot.columns, rotation=45, ha="right")
-        ax.set_yticks(range(len(pivot.index)))
-        ax.set_yticklabels([str(y) for y in pivot.index])
-        ax.set_title("Monthly Return Heatmap")
-        cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-        cbar.set_label("% Return")
-        
-        for i, year in enumerate(pivot.index):
-            for j, month in enumerate(pivot.columns):
-                value = pivot.iloc[i, j]
-                if pd.notna(value):
-                    ax.text(j, i, f"{value:.1f}", ha="center", va="center", fontsize=8, color="black")
-        
-        plt.tight_layout()
-        show_plot("Monthly Return Heatmap")
+# Defensive: Clean all numeric columns - remove commas and convert to numeric
+for col in df.columns:
+    if col != 'Date':
+        # Ensure we're working with a Series, convert to string, remove commas, convert to numeric
+        series_data = df[col] if isinstance(df[col], pd.Series) else df[col].iloc[:, 0]
+        series_data = series_data.astype(str).str.replace(',', '', regex=False)
+        df[col] = pd.to_numeric(series_data, errors='coerce')
 
-        # Seasonal avg
-        seasonal = mdf.groupby("Month")['Return'].mean().reindex(month_order)
-        plt.figure(figsize=(10,4))
-        seasonal.plot(kind='bar', color='black')
-        plt.title("Seasonal Monthly Average Return")
-        show_plot("Seasonal Monthly Average Return")
+df['Date'] = pd.to_datetime(df['Date'], errors='coerce', dayfirst=True)
+df = df.dropna(subset=['Date', 'Close'])
+df = df.sort_values('Date')
+df.set_index('Date', inplace=True)
+
+document.getElementById("output").innerHTML = f"<p><b>📅 Date Range:</b> {df.index.min().date()} to {df.index.max().date()}</p><p><b>🔢 Rows:</b> {len(df)}</p><p><b>🧾 Columns:</b> {', '.join(df.columns)}</p>"
+
+# Add return + volatility
+df['Return'] = df['Close'].pct_change()
+df['Volatility'] = df['Return'].rolling(30).std() * 100
+df['MA_50'] = df['Close'].rolling(50).mean()
+df['MA_200'] = df['Close'].rolling(200).mean()
+
+# Calculate RSI (Relative Strength Index)
+delta = df['Close'].diff()
+gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+rs = gain / loss
+df['RSI'] = 100 - (100 / (1 + rs))
+
+def show_plot(title):
+    buf = io.BytesIO()
+    plt.tight_layout()
+    plt.savefig(buf, format='png', bbox_inches='tight')
+    plt.close()
+    img_str = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode('utf-8')
+    document.getElementById("charts").innerHTML += f"<h4>{title}</h4><img src='{img_str}' style='max-width:100%; height:auto;'><br>"
+
+# Trend
+plt.figure(figsize=(10,4))
+df['Close'].plot(color='black')
+plt.title("Trend: Close Price")
+show_plot("Trend: Close Price")
+
+# Volatility
+plt.figure(figsize=(10,4))
+df['Volatility'].plot(color='black')
+plt.title("30-Day Rolling Volatility (%)")
+show_plot("30-Day Rolling Volatility (%)")
+
+# Moving Averages
+plt.figure(figsize=(10,4))
+df[['Close', 'MA_50', 'MA_200']].plot()
+plt.title("Moving Averages (50 & 200)")
+show_plot("Moving Averages (50 & 200)")
+
+# RSI (Relative Strength Index)
+plt.figure(figsize=(10,4))
+df['RSI'].plot(color='purple')
+plt.axhline(y=70, color='r', linestyle='--', label='Overbought (70)')
+plt.axhline(y=30, color='g', linestyle='--', label='Oversold (30)')
+plt.title("RSI (14-period)")
+plt.ylabel("RSI")
+plt.legend()
+plt.ylim(0, 100)
+show_plot("RSI (14-period)")
+
+# Yearly returns
+yr = df['Close'].resample('Y').last().pct_change()*100
+plt.figure(figsize=(10,4))
+yr.dropna().plot(kind='bar', color='black')
+plt.title("Yearly Returns (%)")
+show_plot("Yearly Returns (%)")
+
+# Monthly return heatmap
+monthly = df['Close'].resample('M').last().pct_change() * 100
+mdf = monthly.to_frame(name="Return")
+mdf['Year'] = mdf.index.year
+mdf['Month'] = mdf.index.month_name()
+pivot = mdf.pivot(index="Year", columns="Month", values="Return")
+month_order = ['January','February','March','April','May','June','July','August','September','October','November','December']
+pivot = pivot.reindex(columns=month_order)
+
+heatmap_array = pivot.to_numpy(dtype=float)
+finite_mask = np.isfinite(heatmap_array)
+max_abs = np.nanmax(np.abs(heatmap_array[finite_mask])) if finite_mask.any() else 1
+if not np.isfinite(max_abs) or max_abs == 0:
+    max_abs = 1
+heatmap_masked = np.ma.masked_invalid(heatmap_array)
+
+plt.figure(figsize=(12,5))
+fig, ax = plt.subplots(figsize=(12, 5))
+im = ax.imshow(
+    heatmap_masked,
+    cmap="RdYlGn",
+    aspect="auto",
+    vmin=-max_abs,
+    vmax=max_abs,
+)
+ax.set_xticks(range(len(pivot.columns)))
+ax.set_xticklabels(pivot.columns, rotation=45, ha="right")
+ax.set_yticks(range(len(pivot.index)))
+ax.set_yticklabels([str(y) for y in pivot.index])
+ax.set_title("Monthly Return Heatmap")
+cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+cbar.set_label("% Return")
+
+for i, year in enumerate(pivot.index):
+    for j, month in enumerate(pivot.columns):
+        value = pivot.iloc[i, j]
+        if pd.notna(value):
+            ax.text(j, i, f"{value:.1f}", ha="center", va="center", fontsize=8, color="black")
+
+plt.tight_layout()
+show_plot("Monthly Return Heatmap")
+
+# Seasonal avg
+seasonal = mdf.groupby("Month")['Return'].mean().reindex(month_order)
+plt.figure(figsize=(10,4))
+seasonal.plot(kind='bar', color='black')
+plt.title("Seasonal Monthly Average Return")
+show_plot("Seasonal Monthly Average Return")
+
+# Prepare analysis summary for AI context
+latest_price = df['Close'].iloc[-1]
+latest_rsi = df['RSI'].iloc[-1]
+price_change_pct = ((df['Close'].iloc[-1] - df['Close'].iloc[0]) / df['Close'].iloc[0]) * 100
+avg_volatility = df['Volatility'].mean()
+current_volatility = df['Volatility'].iloc[-1]
+
+ma_signal = "neutral"
+if df['Close'].iloc[-1] > df['MA_50'].iloc[-1] > df['MA_200'].iloc[-1]:
+    ma_signal = "bullish (Golden Cross pattern)"
+elif df['Close'].iloc[-1] < df['MA_50'].iloc[-1] < df['MA_200'].iloc[-1]:
+    ma_signal = "bearish (Death Cross pattern)"
+
+rsi_signal = "neutral"
+if latest_rsi > 70:
+    rsi_signal = "overbought (>70)"
+elif latest_rsi < 30:
+    rsi_signal = "oversold (<30)"
+
+analysis_summary = """
+📊 Stock Analysis Summary:
+- Date Range: """ + str(df.index.min().date()) + """ to """ + str(df.index.max().date()) + """
+- Total Trading Days: """ + str(len(df)) + """
+- Current Price: $""" + f"{latest_price:.2f}" + """
+- Price Change: """ + f"{price_change_pct:.2f}" + """% over period
+- RSI (14-day): """ + f"{latest_rsi:.2f}" + """ (""" + rsi_signal + """)
+- Current Volatility: """ + f"{current_volatility:.2f}" + """%
+- Average Volatility: """ + f"{avg_volatility:.2f}" + """%
+- Moving Average Signal: """ + ma_signal + """
+- 50-Day MA: $""" + f"{df['MA_50'].iloc[-1]:.2f}" + """
+- 200-Day MA: $""" + f"{df['MA_200'].iloc[-1]:.2f}" + """
+"""
+
+# Return the summary to JavaScript
+analysis_summary
       `);
       
+      // Store the analysis summary in context and auto-request recommendation
+      contextData = pyodide.runPython('analysis_summary');
       document.getElementById("output").innerHTML += "<p style='color: green;'><b>✓ Analysis complete!</b></p>";
+      
+      // Automatically get AI recommendation
+      await getAIRecommendation();
       } catch (error) {
         document.getElementById("output").innerHTML = `<p style='color: red;'><b>Error:</b> ${error.message}</p>`;
         console.error(error);

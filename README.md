@@ -4,11 +4,15 @@ A browser-based time series analysis application for stock market data using Pyo
 
 ## Features
 
-- 📊 **Interactive Charts**: Price trends, volatility analysis, moving averages
-- 📈 **Technical Analysis**: 50-day and 200-day moving averages, return calculations
+- 📊 **Interactive Charts**: Price trends, volatility analysis, moving averages, RSI
+- 📈 **Technical Analysis**: 
+  - 50-day and 200-day moving averages
+  - RSI (Relative Strength Index) with overbought/oversold levels
+  - Return calculations and volatility metrics
+- 🤖 **AI-Powered Recommendations**: Automatically generates investment insights using OpenAI GPT-4o
 - 📁 **CSV Upload**: Upload your own stock data files
 - 🌐 **No Backend Required**: Runs entirely in the browser using Pyodide
-- 🤖 **AI Assistant Panel**: Get insights and ask questions about your data
+- 💬 **AI Assistant Panel**: Get insights and ask questions about your data
 
 ## CSV File Requirements
 
@@ -46,6 +50,21 @@ Date,Close,Open,High,Low,Volume
 2. Wait for Pyodide to load
 3. Upload your CSV file or use the sample data
 4. View the generated charts and analysis
+5. **Automatic AI Recommendation**: After analysis completes, the AI assistant automatically generates investment recommendations based on:
+   - Current price and price trends
+   - RSI signals (overbought/oversold conditions)
+   - Moving average patterns (Golden/Death Cross)
+   - Volatility analysis
+   - Overall market sentiment
+
+## AI-Powered Analysis
+
+The application includes an intelligent AI assistant that:
+- **Automatically analyzes** all technical indicators after each data upload
+- **Generates recommendations** considering RSI, moving averages, and volatility
+- Provides insights on market sentiment, key signals, and risk assessment
+- Can answer follow-up questions about your data
+- Supports image upload for chart analysis
 
 ## Technical Details
 
