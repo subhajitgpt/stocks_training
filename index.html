@@ -449,10 +449,6 @@
     </p>
 
     <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; margin: 16px 0;">
-      <div class="control-group" style="min-width: 420px;">
-        <label for="n8nWebhookUrl">n8n Webhook URL</label>
-        <input id="n8nWebhookUrl" type="text" value="http://localhost:5678/webhook/stock-world-correlation" />
-      </div>
       <button class="btn-backtest" id="invokeN8nBtn">Invoke n8n</button>
     </div>
 
@@ -2371,11 +2367,7 @@ analysis_summary
         return;
       }
 
-      const webhookUrl = document.getElementById('n8nWebhookUrl').value.trim();
-      if (!webhookUrl) {
-        alert('Please set the n8n webhook URL.');
-        return;
-      }
+      const webhookUrl = 'https://subhajit86.app.n8n.cloud/webhook/stock-world-correlation';
 
       const payloadToSend = prepareN8nPayload();
       document.getElementById('n8nPayloadPreview').textContent = safeJsonStringify(payloadToSend);
