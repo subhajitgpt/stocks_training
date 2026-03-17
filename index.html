@@ -376,7 +376,9 @@
         </div>
       </div>
     </div>
-    <input type="file" id="fileInputChart" accept=".csv" style="margin-bottom: 16px;">
+    <div id="chartDataSourceNote" style="margin-bottom: 16px; color:#666;">
+      Uses the CSV uploaded in the <b>📊 Analysis</b> tab.
+    </div>
     <div id="chartContainer">
       <canvas id="candlestickChart"></canvas>
     </div>
@@ -389,8 +391,10 @@
     
     <div class="backtest-controls">
       <div class="control-group">
-        <label>Upload CSV Data</label>
-        <input type="file" id="fileInputBacktest" accept=".csv">
+        <label>CSV Data</label>
+        <div id="backtestDataSourceNote" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; background: #fff; color:#666;">
+          Uses the CSV uploaded in the <b>📊 Analysis</b> tab.
+        </div>
       </div>
       <div class="control-group">
         <label>Initial Capital (₹)</label>
@@ -520,9 +524,11 @@
       } else if (tabName === 'chart') {
         document.getElementById('chartTab').classList.add('active');
         tabs[1].classList.add('active');
+        try { syncChartAndBacktestFromAnalysisUpload(); } catch {}
       } else if (tabName === 'backtest') {
         document.getElementById('backtestTab').classList.add('active');
         tabs[2].classList.add('active');
+        try { syncChartAndBacktestFromAnalysisUpload(); } catch {}
       } else if (tabName === 'n8n') {
         document.getElementById('n8nTab').classList.add('active');
         tabs[3].classList.add('active');
@@ -939,56 +945,156 @@
       }
     }
     
-    // Load CSV for candlestick chart
-    document.getElementById('fileInputChart').addEventListener('change', async (evt) => {
-      const file = evt.target.files[0];
-      if (!file) return;
-      
-      const text = await file.text();
-      const lines = text.trim().split('\n');
+    // ===== Shared CSV loader (Tab 1 -> Tabs 2 & 3) =====
+    function normalizeKey(key) {
+      return String(key || '')
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, '_');
+    }
+
+    function findHeaderIndex(headers, candidates) {
+      const normalized = headers.map(normalizeKey);
+      const candNorm = candidates.map(normalizeKey);
+      for (let i = 0; i < normalized.length; i++) {
+        if (candNorm.includes(normalized[i])) return i;
+      }
+      return -1;
+    }
+
+    function parseMaybeNumber(val) {
+      if (val === undefined || val === null) return NaN;
+      const s = String(val).trim();
+      if (!s) return NaN;
+      const n = Number(s.replace(/,/g, ''));
+      return Number.isFinite(n) ? n : NaN;
+    }
+
+    function parseFlexibleDate(raw) {
+      if (!raw) return null;
+      const s = String(raw).trim();
+      if (!s) return null;
+      // ISO-like (YYYY-MM-DD) or RFC
+      if (s.includes('-')) {
+        const d = new Date(s);
+        return Number.isFinite(d.getTime()) ? d : null;
+      }
+      // Common CSV format: DD/MM/YYYY (or YYYY/MM/DD)
+      if (s.includes('/')) {
+        const parts = s.split('/').map(p => p.trim());
+        if (parts.length === 3) {
+          let day, month, year;
+          if (parts[0].length === 4) {
+            year = Number(parts[0]);
+            month = Number(parts[1]);
+            day = Number(parts[2]);
+          } else {
+            day = Number(parts[0]);
+            month = Number(parts[1]);
+            year = Number(parts[2]);
+          }
+          if ([day, month, year].every(Number.isFinite)) {
+            const d = new Date(year, month - 1, day);
+            return Number.isFinite(d.getTime()) ? d : null;
+          }
+        }
+      }
+      const fallback = new Date(s);
+      return Number.isFinite(fallback.getTime()) ? fallback : null;
+    }
+
+    function parseOhlcvFromCsvText(text) {
+      const raw = String(text || '').trim();
+      if (!raw) return [];
+      const lines = raw.split(/\r?\n/).filter(Boolean);
+      if (lines.length < 2) return [];
+
       const headers = lines[0].split(',').map(h => h.trim());
-      
-      chartData = [];
+
+      const idxDate = findHeaderIndex(headers, ['Date', 'Timestamp', 'Time']);
+      const idxClose = findHeaderIndex(headers, ['Close', 'Adj Close', 'Adj_Close', 'Closing_Price', 'Closing Price']);
+      const idxOpen = findHeaderIndex(headers, ['Open', 'Opening_Price', 'Opening Price']);
+      const idxHigh = findHeaderIndex(headers, ['High', 'High_Price', 'High Price']);
+      const idxLow = findHeaderIndex(headers, ['Low', 'Low_Price', 'Low Price']);
+      const idxVol = findHeaderIndex(headers, ['Volume', 'Vol', 'Trading_Volume', 'Trading Volume']);
+
+      if (idxDate === -1 || idxClose === -1) return [];
+
+      const out = [];
       for (let i = 1; i < lines.length; i++) {
         const values = lines[i].split(',');
-        const row = {};
-        headers.forEach((h, idx) => {
-          row[h] = values[idx];
-        });
-        
-        // Parse date formats like "17/05/2022"
-        const dateParts = row['Date'].split('/');
-        const date = new Date(dateParts[2], dateParts[1] - 1, dateParts[0]);
-        
-        chartData.push({
-          date: date,
-          open: parseFloat(row['Open']),
-          high: parseFloat(row['High']),
-          low: parseFloat(row['Low']),
-          close: parseFloat(row['Close']),
-          volume: parseFloat(row['Volume'])
-        });
+        const date = parseFlexibleDate(values[idxDate]);
+        if (!date) continue;
+
+        const close = parseMaybeNumber(values[idxClose]);
+        if (!Number.isFinite(close)) continue;
+
+        const open = Number.isFinite(parseMaybeNumber(values[idxOpen])) ? parseMaybeNumber(values[idxOpen]) : close;
+        const high = Number.isFinite(parseMaybeNumber(values[idxHigh])) ? parseMaybeNumber(values[idxHigh]) : Math.max(open, close);
+        const low = Number.isFinite(parseMaybeNumber(values[idxLow])) ? parseMaybeNumber(values[idxLow]) : Math.min(open, close);
+        const volume = Number.isFinite(parseMaybeNumber(values[idxVol])) ? parseMaybeNumber(values[idxVol]) : 0;
+
+        out.push({ date, open, high, low, close, volume });
       }
-      
-      // Update stock header with latest data
-      if (chartData.length > 0) {
-        const latest = chartData[chartData.length - 1];
-        const previous = chartData[chartData.length - 2];
-        const change = latest.close - previous.close;
-        const changePercent = (change / previous.close) * 100;
-        
-        document.getElementById('openPrice').textContent = latest.open.toFixed(2);
-        document.getElementById('highPrice').textContent = latest.high.toFixed(2);
-        document.getElementById('lowPrice').textContent = latest.low.toFixed(2);
-        document.getElementById('closePrice').textContent = latest.close.toFixed(2);
-        
+
+      out.sort((a, b) => a.date - b.date);
+      return out;
+    }
+
+    function updateChartHeaderFromData() {
+      if (chartData.length === 0) {
+        document.getElementById('openPrice').textContent = '--';
+        document.getElementById('highPrice').textContent = '--';
+        document.getElementById('lowPrice').textContent = '--';
+        document.getElementById('closePrice').textContent = '--';
         const priceChangeEl = document.getElementById('priceChange');
+        priceChangeEl.textContent = '-- (--)';
+        priceChangeEl.className = 'price-change';
+        return;
+      }
+
+      const latest = chartData[chartData.length - 1];
+      const previous = chartData.length >= 2 ? chartData[chartData.length - 2] : null;
+      const change = previous ? (latest.close - previous.close) : 0;
+      const changePercent = previous ? (change / previous.close) * 100 : 0;
+
+      document.getElementById('openPrice').textContent = latest.open.toFixed(2);
+      document.getElementById('highPrice').textContent = latest.high.toFixed(2);
+      document.getElementById('lowPrice').textContent = latest.low.toFixed(2);
+      document.getElementById('closePrice').textContent = latest.close.toFixed(2);
+
+      const priceChangeEl = document.getElementById('priceChange');
+      if (previous) {
         priceChangeEl.textContent = `${change >= 0 ? '+' : ''}${change.toFixed(2)} (${change >= 0 ? '+' : ''}${changePercent.toFixed(2)}%)`;
         priceChangeEl.className = change >= 0 ? 'price-change' : 'price-change negative';
+      } else {
+        priceChangeEl.textContent = '-- (--)';
+        priceChangeEl.className = 'price-change';
       }
-      
-      drawCandlestickChart(chartData);
-    });
+    }
+
+    function syncChartAndBacktestFromAnalysisUpload() {
+      if (!uploadedFileContent) {
+        chartData = [];
+        backtestData = [];
+        hoveredCandle = null;
+        updateChartHeaderFromData();
+        drawCandlestickChart(chartData);
+        document.getElementById('runBacktest').disabled = true;
+        return;
+      }
+
+      const csvText = new TextDecoder('utf-8').decode(uploadedFileContent);
+      const parsed = parseOhlcvFromCsvText(csvText);
+      chartData = parsed;
+      backtestData = parsed.slice();
+
+      updateChartHeaderFromData();
+      if (chartData.length > 0) {
+        drawCandlestickChart(chartData);
+      }
+      document.getElementById('runBacktest').disabled = backtestData.length === 0;
+    }
     
     // Add mouse move event for hover tooltips
     document.getElementById('candlestickChart').addEventListener('mousemove', (e) => {
@@ -1061,42 +1167,6 @@
 
     // ============ BACKTESTING SECTION ============
     let backtestData = [];
-    
-    // Load CSV for backtesting
-    document.getElementById('fileInputBacktest').addEventListener('change', async (evt) => {
-      const file = evt.target.files[0];
-      if (!file) {
-        document.getElementById('runBacktest').disabled = true;
-        return;
-      }
-      
-      const text = await file.text();
-      const lines = text.trim().split('\n');
-      const headers = lines[0].split(',').map(h => h.trim());
-      
-      backtestData = [];
-      for (let i = 1; i < lines.length; i++) {
-        const values = lines[i].split(',');
-        const row = {};
-        headers.forEach((h, idx) => {
-          row[h] = values[idx];
-        });
-        
-        const dateParts = row['Date'].split('/');
-        const date = new Date(dateParts[2], dateParts[1] - 1, dateParts[0]);
-        
-        backtestData.push({
-          date: date,
-          open: parseFloat(row['Open']),
-          high: parseFloat(row['High']),
-          low: parseFloat(row['Low']),
-          close: parseFloat(row['Close']),
-          volume: parseFloat(row['Volume'])
-        });
-      }
-      
-      document.getElementById('runBacktest').disabled = false;
-    });
     
     // Run backtest
     document.getElementById('runBacktest').addEventListener('click', () => {
@@ -2070,6 +2140,9 @@ analysis_summary
       const file = evt.target.files[0];
       if (!file) {
         document.getElementById("analyzeBtn").disabled = true;
+        uploadedFileContent = null;
+        analysisSourceFileName = null;
+        try { syncChartAndBacktestFromAnalysisUpload(); } catch {}
         return;
       }
 
@@ -2081,6 +2154,9 @@ analysis_summary
       document.getElementById("output").textContent = `File "${file.name}" loaded. Click Analyze to process.`;
       document.getElementById("charts").innerHTML = "";
       document.getElementById("analyzeBtn").disabled = false;
+
+      // Reuse the same uploaded CSV for Tab 2 (Chart) and Tab 3 (Backtest)
+      try { syncChartAndBacktestFromAnalysisUpload(); } catch {}
     });
 
     document.getElementById("analyzeBtn").addEventListener("click", async () => {
