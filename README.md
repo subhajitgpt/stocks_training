@@ -57,6 +57,49 @@ Date,Close,Open,High,Low,Volume
    - Volatility analysis
    - Overall market sentiment
 
+## n8n World-Events Correlation (Optional)
+
+This project includes an optional integration to n8n that:
+
+- Converts your latest analysis into a JSON payload (including recent daily returns)
+- Sends it to an n8n webhook when you click **Invoke n8n**
+- Enriches it with world-event signals (war/conflict intensity + oil/energy headlines)
+- Returns a structured response that the UI renders as metric cards + news lists + a short summary
+
+### Setup
+
+1. Install and start n8n (any recent version).
+2. Import the workflow JSON: `n8n/stock-world-correlation-patched.json`
+3. In n8n, activate the workflow.
+4. Open `index.html`, run **Analyze** on a CSV, then go to the **🧩 n8n Correlation** tab.
+5. Ensure the webhook URL matches your n8n instance (default):
+
+  `http://localhost:5678/webhook/stock-world-correlation`
+
+### What the UI shows
+
+The **🧩 n8n Correlation** tab renders these stock-related values (when available):
+
+- `ticker`, `symbol`, `source_file`
+- `current_price`, `price_change_pct`
+- `rsi_14`
+- `current_volatility_pct`, `avg_volatility_pct`
+- `ma_signal`, `ma_50`, `ma_200`
+- `recent_stock_return_pct`
+
+And these macro/correlation values:
+
+- `overall_macro_risk`
+- `war_news_risk_score`, `oil_risk_score`
+- `likely_oil_sensitivity`, `likely_war_sensitivity`
+- `effect_on_stock`
+
+It also lists the returned **war** and **oil/energy** news items and prints the workflow’s `summary`.
+
+### Notes
+
+- If you open `index.html` via `file://` and the webhook call fails, serve the folder via a local web server (so the browser origin is not `null`) and/or enable CORS for your n8n instance.
+
 ## AI-Powered Analysis
 
 The application includes an intelligent AI assistant that:
