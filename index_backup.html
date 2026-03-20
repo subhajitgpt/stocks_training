@@ -349,6 +349,7 @@
     <button class="tab active" onclick="switchTab('analysis')">📊 Analysis</button>
     <button class="tab" onclick="switchTab('chart')">📈 Candlestick Chart</button>
     <button class="tab" onclick="switchTab('backtest')">🔬 Backtest Strategy</button>
+    <button class="tab" onclick="switchTab('n8n')">🧩 n8n Correlation</button>
   </div>
 
   <!-- Tab 1: Analysis -->
@@ -375,7 +376,9 @@
         </div>
       </div>
     </div>
-    <input type="file" id="fileInputChart" accept=".csv" style="margin-bottom: 16px;">
+    <div id="chartDataSourceNote" style="margin-bottom: 16px; color:#666;">
+      Uses the CSV uploaded in the <b>📊 Analysis</b> tab.
+    </div>
     <div id="chartContainer">
       <canvas id="candlestickChart"></canvas>
     </div>
@@ -388,8 +391,10 @@
     
     <div class="backtest-controls">
       <div class="control-group">
-        <label>Upload CSV Data</label>
-        <input type="file" id="fileInputBacktest" accept=".csv">
+        <label>CSV Data</label>
+        <div id="backtestDataSourceNote" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; background: #fff; color:#666;">
+          Uses the CSV uploaded in the <b>📊 Analysis</b> tab.
+        </div>
       </div>
       <div class="control-group">
         <label>Initial Capital (₹)</label>
@@ -435,6 +440,47 @@
     </div>
   </div>
 
+  <!-- Tab 4: n8n Correlation -->
+  <div id="n8nTab" class="tab-content">
+    <h2>🧩 World Events Correlation (n8n)</h2>
+    <p>
+      Converts the latest analysis into JSON and sends it to an n8n webhook.
+      The n8n workflow can enrich it with world-event signals (war/conflict + oil) and return correlation + insights.
+    </p>
+
+    <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; margin: 16px 0;">
+      <button class="btn-backtest" id="invokeN8nBtn">Invoke n8n</button>
+    </div>
+
+    <div style="margin-top: 10px;">
+      <h3>📦 Payload Preview</h3>
+      <pre id="n8nPayloadPreview" style="background:#f8f9fa; padding:12px; border:1px solid #e5e5e5; border-radius:8px; overflow:auto; max-height:220px;"></pre>
+    </div>
+
+    <div style="margin-top: 10px;">
+      <h3>🔎 Correlation Result</h3>
+      <div id="n8nStatus" style="margin-bottom: 8px; color:#555;"></div>
+      <div id="n8nResultView" style="display:none; margin: 12px 0;">
+        <div class="results-grid" id="n8nCards"></div>
+        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin-top: 12px;">
+          <div style="background:#fff; border:1px solid #eee; border-radius:8px; padding:12px;">
+            <h4 style="margin:0 0 10px 0;">🪖 War / Conflict News</h4>
+            <div id="n8nWarNews"></div>
+          </div>
+          <div style="background:#fff; border:1px solid #eee; border-radius:8px; padding:12px;">
+            <h4 style="margin:0 0 10px 0;">🛢️ Oil / Energy News</h4>
+            <div id="n8nOilNews"></div>
+          </div>
+        </div>
+        <div style="background:#fff; border:1px solid #eee; border-radius:8px; padding:12px; margin-top: 12px;">
+          <h4 style="margin:0 0 10px 0;">📝 Summary</h4>
+          <div id="n8nSummary" style="white-space:pre-wrap;"></div>
+        </div>
+      </div>
+      <pre id="n8nResponse" style="background:#f8f9fa; padding:12px; border:1px solid #e5e5e5; border-radius:8px; overflow:auto; max-height:320px;"></pre>
+    </div>
+  </div>
+
   <!-- AI Chat Panel -->
   <div id="aiPanel">
     <div id="aiHeader">
@@ -474,9 +520,14 @@
       } else if (tabName === 'chart') {
         document.getElementById('chartTab').classList.add('active');
         tabs[1].classList.add('active');
+        try { syncChartAndBacktestFromAnalysisUpload(); } catch {}
       } else if (tabName === 'backtest') {
         document.getElementById('backtestTab').classList.add('active');
         tabs[2].classList.add('active');
+        try { syncChartAndBacktestFromAnalysisUpload(); } catch {}
+      } else if (tabName === 'n8n') {
+        document.getElementById('n8nTab').classList.add('active');
+        tabs[3].classList.add('active');
       }
     }
 
@@ -890,56 +941,156 @@
       }
     }
     
-    // Load CSV for candlestick chart
-    document.getElementById('fileInputChart').addEventListener('change', async (evt) => {
-      const file = evt.target.files[0];
-      if (!file) return;
-      
-      const text = await file.text();
-      const lines = text.trim().split('\n');
+    // ===== Shared CSV loader (Tab 1 -> Tabs 2 & 3) =====
+    function normalizeKey(key) {
+      return String(key || '')
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, '_');
+    }
+
+    function findHeaderIndex(headers, candidates) {
+      const normalized = headers.map(normalizeKey);
+      const candNorm = candidates.map(normalizeKey);
+      for (let i = 0; i < normalized.length; i++) {
+        if (candNorm.includes(normalized[i])) return i;
+      }
+      return -1;
+    }
+
+    function parseMaybeNumber(val) {
+      if (val === undefined || val === null) return NaN;
+      const s = String(val).trim();
+      if (!s) return NaN;
+      const n = Number(s.replace(/,/g, ''));
+      return Number.isFinite(n) ? n : NaN;
+    }
+
+    function parseFlexibleDate(raw) {
+      if (!raw) return null;
+      const s = String(raw).trim();
+      if (!s) return null;
+      // ISO-like (YYYY-MM-DD) or RFC
+      if (s.includes('-')) {
+        const d = new Date(s);
+        return Number.isFinite(d.getTime()) ? d : null;
+      }
+      // Common CSV format: DD/MM/YYYY (or YYYY/MM/DD)
+      if (s.includes('/')) {
+        const parts = s.split('/').map(p => p.trim());
+        if (parts.length === 3) {
+          let day, month, year;
+          if (parts[0].length === 4) {
+            year = Number(parts[0]);
+            month = Number(parts[1]);
+            day = Number(parts[2]);
+          } else {
+            day = Number(parts[0]);
+            month = Number(parts[1]);
+            year = Number(parts[2]);
+          }
+          if ([day, month, year].every(Number.isFinite)) {
+            const d = new Date(year, month - 1, day);
+            return Number.isFinite(d.getTime()) ? d : null;
+          }
+        }
+      }
+      const fallback = new Date(s);
+      return Number.isFinite(fallback.getTime()) ? fallback : null;
+    }
+
+    function parseOhlcvFromCsvText(text) {
+      const raw = String(text || '').trim();
+      if (!raw) return [];
+      const lines = raw.split(/\r?\n/).filter(Boolean);
+      if (lines.length < 2) return [];
+
       const headers = lines[0].split(',').map(h => h.trim());
-      
-      chartData = [];
+
+      const idxDate = findHeaderIndex(headers, ['Date', 'Timestamp', 'Time']);
+      const idxClose = findHeaderIndex(headers, ['Close', 'Adj Close', 'Adj_Close', 'Closing_Price', 'Closing Price']);
+      const idxOpen = findHeaderIndex(headers, ['Open', 'Opening_Price', 'Opening Price']);
+      const idxHigh = findHeaderIndex(headers, ['High', 'High_Price', 'High Price']);
+      const idxLow = findHeaderIndex(headers, ['Low', 'Low_Price', 'Low Price']);
+      const idxVol = findHeaderIndex(headers, ['Volume', 'Vol', 'Trading_Volume', 'Trading Volume']);
+
+      if (idxDate === -1 || idxClose === -1) return [];
+
+      const out = [];
       for (let i = 1; i < lines.length; i++) {
         const values = lines[i].split(',');
-        const row = {};
-        headers.forEach((h, idx) => {
-          row[h] = values[idx];
-        });
-        
-        // Parse date formats like "17/05/2022"
-        const dateParts = row['Date'].split('/');
-        const date = new Date(dateParts[2], dateParts[1] - 1, dateParts[0]);
-        
-        chartData.push({
-          date: date,
-          open: parseFloat(row['Open']),
-          high: parseFloat(row['High']),
-          low: parseFloat(row['Low']),
-          close: parseFloat(row['Close']),
-          volume: parseFloat(row['Volume'])
-        });
+        const date = parseFlexibleDate(values[idxDate]);
+        if (!date) continue;
+
+        const close = parseMaybeNumber(values[idxClose]);
+        if (!Number.isFinite(close)) continue;
+
+        const open = Number.isFinite(parseMaybeNumber(values[idxOpen])) ? parseMaybeNumber(values[idxOpen]) : close;
+        const high = Number.isFinite(parseMaybeNumber(values[idxHigh])) ? parseMaybeNumber(values[idxHigh]) : Math.max(open, close);
+        const low = Number.isFinite(parseMaybeNumber(values[idxLow])) ? parseMaybeNumber(values[idxLow]) : Math.min(open, close);
+        const volume = Number.isFinite(parseMaybeNumber(values[idxVol])) ? parseMaybeNumber(values[idxVol]) : 0;
+
+        out.push({ date, open, high, low, close, volume });
       }
-      
-      // Update stock header with latest data
-      if (chartData.length > 0) {
-        const latest = chartData[chartData.length - 1];
-        const previous = chartData[chartData.length - 2];
-        const change = latest.close - previous.close;
-        const changePercent = (change / previous.close) * 100;
-        
-        document.getElementById('openPrice').textContent = latest.open.toFixed(2);
-        document.getElementById('highPrice').textContent = latest.high.toFixed(2);
-        document.getElementById('lowPrice').textContent = latest.low.toFixed(2);
-        document.getElementById('closePrice').textContent = latest.close.toFixed(2);
-        
+
+      out.sort((a, b) => a.date - b.date);
+      return out;
+    }
+
+    function updateChartHeaderFromData() {
+      if (chartData.length === 0) {
+        document.getElementById('openPrice').textContent = '--';
+        document.getElementById('highPrice').textContent = '--';
+        document.getElementById('lowPrice').textContent = '--';
+        document.getElementById('closePrice').textContent = '--';
         const priceChangeEl = document.getElementById('priceChange');
+        priceChangeEl.textContent = '-- (--)';
+        priceChangeEl.className = 'price-change';
+        return;
+      }
+
+      const latest = chartData[chartData.length - 1];
+      const previous = chartData.length >= 2 ? chartData[chartData.length - 2] : null;
+      const change = previous ? (latest.close - previous.close) : 0;
+      const changePercent = previous ? (change / previous.close) * 100 : 0;
+
+      document.getElementById('openPrice').textContent = latest.open.toFixed(2);
+      document.getElementById('highPrice').textContent = latest.high.toFixed(2);
+      document.getElementById('lowPrice').textContent = latest.low.toFixed(2);
+      document.getElementById('closePrice').textContent = latest.close.toFixed(2);
+
+      const priceChangeEl = document.getElementById('priceChange');
+      if (previous) {
         priceChangeEl.textContent = `${change >= 0 ? '+' : ''}${change.toFixed(2)} (${change >= 0 ? '+' : ''}${changePercent.toFixed(2)}%)`;
         priceChangeEl.className = change >= 0 ? 'price-change' : 'price-change negative';
+      } else {
+        priceChangeEl.textContent = '-- (--)';
+        priceChangeEl.className = 'price-change';
       }
-      
-      drawCandlestickChart(chartData);
-    });
+    }
+
+    function syncChartAndBacktestFromAnalysisUpload() {
+      if (!uploadedFileContent) {
+        chartData = [];
+        backtestData = [];
+        hoveredCandle = null;
+        updateChartHeaderFromData();
+        drawCandlestickChart(chartData);
+        document.getElementById('runBacktest').disabled = true;
+        return;
+      }
+
+      const csvText = new TextDecoder('utf-8').decode(uploadedFileContent);
+      const parsed = parseOhlcvFromCsvText(csvText);
+      chartData = parsed;
+      backtestData = parsed.slice();
+
+      updateChartHeaderFromData();
+      if (chartData.length > 0) {
+        drawCandlestickChart(chartData);
+      }
+      document.getElementById('runBacktest').disabled = backtestData.length === 0;
+    }
     
     // Add mouse move event for hover tooltips
     document.getElementById('candlestickChart').addEventListener('mousemove', (e) => {
@@ -1012,42 +1163,6 @@
 
     // ============ BACKTESTING SECTION ============
     let backtestData = [];
-    
-    // Load CSV for backtesting
-    document.getElementById('fileInputBacktest').addEventListener('change', async (evt) => {
-      const file = evt.target.files[0];
-      if (!file) {
-        document.getElementById('runBacktest').disabled = true;
-        return;
-      }
-      
-      const text = await file.text();
-      const lines = text.trim().split('\n');
-      const headers = lines[0].split(',').map(h => h.trim());
-      
-      backtestData = [];
-      for (let i = 1; i < lines.length; i++) {
-        const values = lines[i].split(',');
-        const row = {};
-        headers.forEach((h, idx) => {
-          row[h] = values[idx];
-        });
-        
-        const dateParts = row['Date'].split('/');
-        const date = new Date(dateParts[2], dateParts[1] - 1, dateParts[0]);
-        
-        backtestData.push({
-          date: date,
-          open: parseFloat(row['Open']),
-          high: parseFloat(row['High']),
-          low: parseFloat(row['Low']),
-          close: parseFloat(row['Close']),
-          volume: parseFloat(row['Volume'])
-        });
-      }
-      
-      document.getElementById('runBacktest').disabled = false;
-    });
     
     // Run backtest
     document.getElementById('runBacktest').addEventListener('click', () => {
@@ -1342,6 +1457,8 @@
     let conversationHistory = [];
     let currentAbortController = null;
     let contextData = "";
+    let analysisPayload = null;
+    let analysisSourceFileName = null;
     let uploadedImageBase64 = null;
     
     const aiPanel = document.getElementById('aiPanel');
@@ -1758,6 +1875,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 import io, base64
+import json
 from js import document
 
 df = pd.read_csv("uploaded.csv")
@@ -1957,12 +2075,53 @@ analysis_summary = """
 - 200-Day MA: $""" + f"{df['MA_200'].iloc[-1]:.2f}" + """
 """
 
-# Return the summary to JavaScript
+# Build compact JSON payload for n8n (keep size reasonable)
+series_df = df[['Close', 'Return']].copy().reset_index()
+series_df['Date'] = series_df['Date'].dt.strftime('%Y-%m-%d')
+series_df = series_df.replace({np.nan: None})
+
+max_points = 450
+if len(series_df) > max_points:
+    series_df = series_df.iloc[-max_points:]
+
+analysis_payload = {
+  "schema": "stock_training.analysis.v1",
+  "generated_at": pd.Timestamp.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'),
+  "date_range": {
+    "start": str(df.index.min().date()),
+    "end": str(df.index.max().date())
+  },
+  "metrics": {
+    "current_price": float(latest_price),
+    "price_change_pct": float(price_change_pct),
+    "rsi_14": float(latest_rsi) if pd.notna(latest_rsi) else None,
+    "current_volatility_pct": float(current_volatility) if pd.notna(current_volatility) else None,
+    "avg_volatility_pct": float(avg_volatility) if pd.notna(avg_volatility) else None,
+    "ma_signal": ma_signal,
+    "ma_50": float(df['MA_50'].iloc[-1]) if pd.notna(df['MA_50'].iloc[-1]) else None,
+    "ma_200": float(df['MA_200'].iloc[-1]) if pd.notna(df['MA_200'].iloc[-1]) else None,
+  },
+  "series": series_df.to_dict(orient='records'),
+  "analysis_summary": analysis_summary.strip()
+}
+
+analysis_payload_json = json.dumps(analysis_payload)
+
+# Return the summary to JavaScript (kept for existing UI + AI assistant)
 analysis_summary
       `);
       
       // Store the analysis summary in context and auto-request recommendation
       contextData = pyodide.runPython('analysis_summary');
+      try {
+        analysisPayload = JSON.parse(pyodide.runPython('analysis_payload_json'));
+        if (analysisSourceFileName) {
+          analysisPayload.source_file = analysisSourceFileName;
+        }
+      } catch (e) {
+        console.warn('Failed to parse analysis_payload_json:', e);
+        analysisPayload = null;
+      }
       document.getElementById("output").innerHTML += "<p style='color: green;'><b>✓ Analysis complete!</b></p>";
       
       // Automatically get AI recommendation
@@ -1977,8 +2136,13 @@ analysis_summary
       const file = evt.target.files[0];
       if (!file) {
         document.getElementById("analyzeBtn").disabled = true;
+        uploadedFileContent = null;
+        analysisSourceFileName = null;
+        try { syncChartAndBacktestFromAnalysisUpload(); } catch {}
         return;
       }
+
+      analysisSourceFileName = file.name;
       
       const arrayBuffer = await file.arrayBuffer();
       uploadedFileContent = new Uint8Array(arrayBuffer);
@@ -1986,6 +2150,9 @@ analysis_summary
       document.getElementById("output").textContent = `File "${file.name}" loaded. Click Analyze to process.`;
       document.getElementById("charts").innerHTML = "";
       document.getElementById("analyzeBtn").disabled = false;
+
+      // Reuse the same uploaded CSV for Tab 2 (Chart) and Tab 3 (Backtest)
+      try { syncChartAndBacktestFromAnalysisUpload(); } catch {}
     });
 
     document.getElementById("analyzeBtn").addEventListener("click", async () => {
@@ -1995,6 +2162,254 @@ analysis_summary
       }
       await analyzeCSV(uploadedFileContent);
     });
+
+    // ============ n8n CORRELATION TAB ============
+    function safeJsonStringify(obj) {
+      try {
+        return JSON.stringify(obj, null, 2);
+      } catch {
+        return String(obj);
+      }
+    }
+
+    function setN8nStatus(message, isError = false) {
+      const el = document.getElementById('n8nStatus');
+      el.textContent = message;
+      el.style.color = isError ? '#b00020' : '#555';
+    }
+
+    function inferSymbolFromFileName(fileName) {
+      if (!fileName) return null;
+      const base = String(fileName).split(/[/\\]/).pop().replace(/\.[^.]+$/, '');
+      const first = base.split('_')[0];
+      if (!first) return null;
+      // Handle patterns like LICI_NS_5y.csv -> LICI.NS
+      if (first.includes('.')) return first.toUpperCase();
+      if (first.includes('NS') && first.includes('-') === false) {
+        // no-op, fallthrough
+      }
+      // If it looks like ABC_NS, convert to ABC.NS
+      if (first.toUpperCase().endsWith('NS') && first.includes('_')) {
+        const parts = first.split('_').filter(Boolean);
+        if (parts.length === 2 && parts[1].toUpperCase() === 'NS') {
+          return `${parts[0]}.NS`.toUpperCase();
+        }
+      }
+      return first.toUpperCase();
+    }
+
+    function computeStd(values) {
+      const nums = values.filter(v => Number.isFinite(v));
+      if (nums.length < 2) return null;
+      const mean = nums.reduce((s, v) => s + v, 0) / nums.length;
+      const variance = nums.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / (nums.length - 1);
+      return Math.sqrt(variance);
+    }
+
+    function prepareN8nPayload() {
+      // Make a shallow copy so we don't mutate the stored payload unexpectedly
+      const payload = JSON.parse(JSON.stringify(analysisPayload));
+
+      payload.source_file = payload.source_file || analysisSourceFileName || null;
+      payload.ticker = payload.ticker || payload.symbol || inferSymbolFromFileName(payload.source_file);
+
+      payload.metrics = payload.metrics || {};
+      const series = Array.isArray(payload.series) ? payload.series : [];
+
+      // Fill current_price from last Close
+      if (payload.metrics.current_price == null && series.length) {
+        const last = series[series.length - 1];
+        const lastClose = Number(last.Close);
+        payload.metrics.current_price = Number.isFinite(lastClose) ? lastClose : null;
+      }
+
+      // Fill price_change_pct from first/last Close
+      if (payload.metrics.price_change_pct == null && series.length >= 2) {
+        const firstClose = Number(series[0].Close);
+        const lastClose = Number(series[series.length - 1].Close);
+        if (Number.isFinite(firstClose) && firstClose !== 0 && Number.isFinite(lastClose)) {
+          payload.metrics.price_change_pct = ((lastClose - firstClose) / firstClose) * 100;
+        }
+      }
+
+      // Compute recent_stock_return_pct (last non-null Return)
+      const returns = series.map(r => Number(r.Return)).filter(v => Number.isFinite(v));
+      payload.metrics.recent_stock_return_pct = payload.metrics.recent_stock_return_pct ?? (returns.length ? returns[returns.length - 1] * 100 : null);
+
+      // Compute volatility from last 30 returns (std * 100)
+      if (payload.metrics.current_volatility_pct == null) {
+        const last30 = returns.slice(-30);
+        const std = computeStd(last30);
+        payload.metrics.current_volatility_pct = std == null ? null : std * 100;
+      }
+      if (payload.metrics.avg_volatility_pct == null) {
+        const std = computeStd(returns);
+        payload.metrics.avg_volatility_pct = std == null ? null : std * 100;
+      }
+
+      return payload;
+    }
+
+    function metricCard(label, value, tone = null) {
+      const toneClass = tone ? ` ${tone}` : '';
+      const safeLabel = escapeHtml(label);
+      const safeValue = escapeHtml(value);
+      return `
+        <div class="metric-card${toneClass}">
+          <div class="metric-label">${safeLabel}</div>
+          <div class="metric-value${toneClass}">${safeValue}</div>
+        </div>
+      `;
+    }
+
+    function escapeHtml(val) {
+      if (val === null || val === undefined) return '';
+      return String(val)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function formatMaybeNumber(val, digits = 2, suffix = '') {
+      const num = Number(val);
+      if (!Number.isFinite(num)) return 'N/A';
+      return `${num.toFixed(digits)}${suffix}`;
+    }
+
+    function renderNewsList(containerId, items) {
+      const el = document.getElementById(containerId);
+      const list = Array.isArray(items) ? items : [];
+      if (!list.length) {
+        el.innerHTML = '<div style="color:#666;">No items returned.</div>';
+        return;
+      }
+      el.innerHTML = `
+        <ul style="margin:0; padding-left: 18px;">
+          ${list.map(a => {
+            const title = (a.title || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            const source = (a.source || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            const when = a.published_at ? new Date(a.published_at).toLocaleString() : '';
+            return `<li style="margin-bottom: 8px;"><div><b>${title}</b></div><div style="color:#666; font-size:12px;">${source}${when ? ' · ' + when : ''}</div></li>`;
+          }).join('')}
+        </ul>
+      `;
+    }
+
+    function renderN8nResult(result) {
+      const view = document.getElementById('n8nResultView');
+      const cards = document.getElementById('n8nCards');
+
+      if (!result || typeof result !== 'object') {
+        view.style.display = 'none';
+        return;
+      }
+
+      // The patched workflow returns nested objects (stock/macro/correlation)
+      // but also duplicates some fields at the top-level.
+      const stock = (result.stock && typeof result.stock === 'object') ? result.stock : result;
+      const macro = (result.macro && typeof result.macro === 'object') ? result.macro : result;
+      const corr = (result.correlation && typeof result.correlation === 'object') ? result.correlation : result;
+
+      const symbol = stock.symbol || result.symbol || 'N/A';
+      const ticker = stock.ticker || result.ticker || symbol;
+      const sourceFile = stock.source_file || result.source_file || 'N/A';
+
+      const price = stock.current_price ?? result.current_price;
+      const priceChange = stock.price_change_pct ?? result.price_change_pct;
+      const maSignal = stock.ma_signal || result.ma_signal || 'N/A';
+      const effectOnStock = corr.effect_on_stock || result.effect_on_stock || 'N/A';
+
+      const priceTone = Number(priceChange) >= 0 ? 'positive' : 'negative';
+      const recentReturnTone = Number(stock.recent_stock_return_pct ?? result.recent_stock_return_pct) >= 0 ? 'positive' : 'negative';
+
+      const maSignalLower = String(maSignal).toLowerCase();
+      const maTone = maSignalLower.includes('bullish') ? 'positive' : maSignalLower.includes('bearish') ? 'negative' : null;
+
+      const macroRisk = macro.overall_macro_risk || result.overall_macro_risk || 'N/A';
+      const macroRiskLower = String(macroRisk).toLowerCase();
+      const macroTone = (macroRiskLower === 'high' || macroRiskLower === 'elevated') ? 'negative'
+        : (macroRiskLower === 'contained') ? 'positive'
+        : null;
+
+      const cardsHtml = [
+        metricCard('Ticker', ticker),
+        metricCard('Symbol', symbol),
+        metricCard('Source File', sourceFile),
+        metricCard('Current Price', Number.isFinite(Number(price)) ? formatMaybeNumber(price, 2) : 'N/A'),
+        metricCard('Price Change', formatMaybeNumber(priceChange, 2, '%'), Number.isFinite(Number(priceChange)) ? priceTone : null),
+        metricCard('RSI (14)', formatMaybeNumber(stock.rsi_14 ?? result.rsi_14, 2)),
+        metricCard('Volatility (Current)', formatMaybeNumber(stock.current_volatility_pct ?? result.current_volatility_pct, 2, '%')),
+        metricCard('Volatility (Average)', formatMaybeNumber(stock.avg_volatility_pct ?? result.avg_volatility_pct, 2, '%')),
+        metricCard('MA Signal', maSignal, maTone),
+        metricCard('MA 50', formatMaybeNumber(stock.ma_50 ?? result.ma_50, 2)),
+        metricCard('MA 200', formatMaybeNumber(stock.ma_200 ?? result.ma_200, 2)),
+        metricCard('Recent Return', formatMaybeNumber(stock.recent_stock_return_pct ?? result.recent_stock_return_pct, 2, '%'), Number.isFinite(Number(stock.recent_stock_return_pct ?? result.recent_stock_return_pct)) ? recentReturnTone : null),
+        metricCard('Macro Risk', macroRisk, macroTone),
+        metricCard('War Risk Score', Number.isFinite(Number(macro.war_news_risk_score ?? result.war_news_risk_score)) ? `${Number(macro.war_news_risk_score ?? result.war_news_risk_score)}/100` : 'N/A'),
+        metricCard('Oil Risk Score', Number.isFinite(Number(macro.oil_risk_score ?? result.oil_risk_score)) ? `${Number(macro.oil_risk_score ?? result.oil_risk_score)}/100` : 'N/A'),
+        metricCard('Oil Sensitivity', corr.likely_oil_sensitivity || result.likely_oil_sensitivity || 'N/A'),
+        metricCard('War Sensitivity', corr.likely_war_sensitivity || result.likely_war_sensitivity || 'N/A'),
+        metricCard('Effect on Stock', effectOnStock)
+      ].join('');
+
+      cards.innerHTML = cardsHtml;
+      renderNewsList('n8nWarNews', result.news?.war);
+      renderNewsList('n8nOilNews', result.news?.oil);
+      document.getElementById('n8nSummary').textContent = result.summary || '';
+      view.style.display = 'block';
+    }
+
+    async function invokeN8n() {
+      if (!analysisPayload) {
+        alert('Run Analysis first (Tab: Analysis) so there is data to send to n8n.');
+        return;
+      }
+
+      const webhookUrl = 'https://subhajit86.app.n8n.cloud/webhook/stock-world-correlation';
+
+      const payloadToSend = prepareN8nPayload();
+      document.getElementById('n8nPayloadPreview').textContent = safeJsonStringify(payloadToSend);
+      document.getElementById('n8nResponse').textContent = '';
+      document.getElementById('n8nResultView').style.display = 'none';
+
+      const btn = document.getElementById('invokeN8nBtn');
+      btn.disabled = true;
+      setN8nStatus('Invoking n8n…');
+
+      try {
+        const resp = await fetch(webhookUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payloadToSend)
+        });
+
+        const contentType = resp.headers.get('content-type') || '';
+        let body;
+        if (contentType.includes('application/json')) {
+          body = await resp.json();
+        } else {
+          body = await resp.text();
+        }
+
+        if (!resp.ok) {
+          throw new Error(`n8n webhook error (${resp.status}): ${typeof body === 'string' ? body : safeJsonStringify(body)}`);
+        }
+
+        setN8nStatus('n8n response received.');
+        document.getElementById('n8nResponse').textContent = typeof body === 'string' ? body : safeJsonStringify(body);
+        if (typeof body === 'object') {
+          renderN8nResult(body);
+        }
+      } catch (e) {
+        setN8nStatus(e.message || String(e), true);
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    document.getElementById('invokeN8nBtn').addEventListener('click', invokeN8n);
   </script>
 </body>
 </html>

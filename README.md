@@ -57,6 +57,37 @@ Date,Close,Open,High,Low,Volume
    - Volatility analysis
    - Overall market sentiment
 
+## Google Colab Integration (No Manual CSV Upload)
+
+If Yahoo Finance works reliably in your Colab runtime, use `extract_csv.py` directly in Colab and generate CSVs into a folder.
+
+### Colab quick steps
+
+1. Upload `extract_csv.py` to your Colab session (or clone this repo).
+2. Install dependency:
+
+```python
+!pip -q install yfinance pandas
+```
+
+3. Run batch extraction (example for multiple symbols):
+
+```python
+!python extract_csv.py --symbols TECHM.NS LICI.NS COALINDIA.NS --years 5 --output-dir /content/data
+```
+
+4. Verify generated files:
+
+```python
+import os
+os.listdir('/content/data')
+```
+
+### Notes
+
+- When running in Colab without `--output-dir`, the script now defaults to `/content/data`.
+- You can still run the same script locally in interactive mode (no flags), exactly like before.
+
 ## n8n World-Events Correlation (Optional)
 
 This project includes an optional integration to n8n that:
