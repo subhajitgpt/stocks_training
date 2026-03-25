@@ -478,7 +478,7 @@
     <button class="tab active" onclick="switchTab('analysis')">📊 Analysis</button>
     <button class="tab" onclick="switchTab('chart')">📈 Candlestick Chart</button>
     <button class="tab" onclick="switchTab('backtest')">🔬 Backtest Strategy</button>
-    <button class="tab" onclick="switchTab('n8n')">🧩 n8n Correlation</button>
+    <button class="tab" onclick="switchTab('n8n')">🌍 War & Oil Price Intelligence</button>
   </div>
 
   <!-- Tab 1: Analysis -->
@@ -586,16 +586,16 @@
     </div>
   </div>
 
-  <!-- Tab 4: n8n Correlation -->
+  <!-- Tab 4: Correlation -->
   <div id="n8nTab" class="tab-content">
-    <h2>🧩 World Events Correlation (n8n)</h2>
+    <h2>🧩 World Events Correlation</h2>
     <p>
-      Converts the latest analysis into JSON and sends it to an n8n webhook.
-      The n8n workflow can enrich it with world-event signals (war/conflict + oil) and return correlation + insights.
+      Converts the latest analysis into JSON and sends it to a correlation webhook.
+      The workflow enriches it with world-event signals (war/conflict + oil) and returns correlation + insights.
     </p>
 
     <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; margin: 16px 0;">
-      <button class="btn-backtest" id="invokeN8nBtn">Invoke n8n</button>
+      <button class="btn-backtest" id="invokeN8nBtn">Run Correlation</button>
     </div>
 
     <div style="margin-top: 10px;">
@@ -2591,7 +2591,7 @@ analysis_summary
 
     async function invokeN8n() {
       if (!analysisPayload) {
-        alert('Run Analysis first (Tab: Analysis) so there is data to send to n8n.');
+        alert('Run Analysis first (Tab: Analysis) so there is data to send to the correlation workflow.');
         return;
       }
 
@@ -2604,7 +2604,7 @@ analysis_summary
 
       const btn = document.getElementById('invokeN8nBtn');
       btn.disabled = true;
-      setN8nStatus('Invoking n8n…');
+      setN8nStatus('Running correlation workflow…');
 
       try {
         const resp = await fetch(webhookUrl, {
@@ -2622,10 +2622,10 @@ analysis_summary
         }
 
         if (!resp.ok) {
-          throw new Error(`n8n webhook error (${resp.status}): ${typeof body === 'string' ? body : safeJsonStringify(body)}`);
+          throw new Error(`Correlation webhook error (${resp.status}): ${typeof body === 'string' ? body : safeJsonStringify(body)}`);
         }
 
-        setN8nStatus('n8n response received.');
+        setN8nStatus('Correlation response received.');
         document.getElementById('n8nResponse').textContent = typeof body === 'string' ? body : safeJsonStringify(body);
         if (typeof body === 'object') {
           renderN8nResult(body);
