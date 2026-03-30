@@ -44,6 +44,135 @@
     .tab-content.active {
       display: block;
     }
+    .analysis-upload-card {
+      border: 1px solid #e3e8ef;
+      border-radius: 12px;
+      background: linear-gradient(180deg, #ffffff 0%, #f9fbff 100%);
+      padding: 18px;
+      margin-bottom: 16px;
+    }
+    .analysis-upload-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+    .analysis-upload-header h3 {
+      margin: 0;
+      font-size: 18px;
+      color: #1a2b49;
+    }
+    .analysis-upload-badge {
+      font-size: 12px;
+      font-weight: 700;
+      color: #0b5ed7;
+      background: #e9f2ff;
+      border: 1px solid #cfe2ff;
+      border-radius: 999px;
+      padding: 4px 10px;
+      white-space: nowrap;
+    }
+    .analysis-upload-hint {
+      margin: 0 0 12px 0;
+      color: #475569;
+      font-size: 14px;
+    }
+    .analysis-actions {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-top: 12px;
+    }
+    .btn-analyze {
+      margin: 0;
+      padding: 10px 20px;
+      font-size: 15px;
+      cursor: pointer;
+      background: #007bff;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-weight: 600;
+    }
+    .btn-analyze:disabled {
+      background: #b9c6d8;
+      cursor: not-allowed;
+    }
+    .upload-queue {
+      margin-top: 14px;
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
+      background: #fff;
+      overflow: hidden;
+    }
+    .upload-queue-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 12px;
+      border-bottom: 1px solid #eef2f7;
+      background: #f8fafc;
+      font-size: 13px;
+      color: #334155;
+      font-weight: 600;
+    }
+    .upload-file-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+    .upload-file-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 12px;
+      border-bottom: 1px solid #f1f5f9;
+    }
+    .upload-file-item:last-child {
+      border-bottom: none;
+    }
+    .upload-file-meta {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 0;
+    }
+    .upload-file-name {
+      font-size: 14px;
+      font-weight: 600;
+      color: #0f172a;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 420px;
+    }
+    .upload-file-size {
+      font-size: 12px;
+      color: #64748b;
+    }
+    .file-select-btn {
+      border: 1px solid #cbd5e1;
+      background: #fff;
+      color: #334155;
+      border-radius: 8px;
+      padding: 6px 10px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .file-select-btn.active {
+      border-color: #0b5ed7;
+      background: #0b5ed7;
+      color: #fff;
+    }
+    .file-empty-state {
+      padding: 14px 12px;
+      font-size: 13px;
+      color: #64748b;
+    }
     #chartContainer {
       width: 100%;
       height: 600px;
@@ -349,15 +478,32 @@
     <button class="tab active" onclick="switchTab('analysis')">📊 Analysis</button>
     <button class="tab" onclick="switchTab('chart')">📈 Candlestick Chart</button>
     <button class="tab" onclick="switchTab('backtest')">🔬 Backtest Strategy</button>
-    <button class="tab" onclick="switchTab('n8n')">🧩 n8n Correlation</button>
+    <button class="tab" onclick="switchTab('n8n')">🌍 War & Oil Price Intelligence</button>
   </div>
 
   <!-- Tab 1: Analysis -->
   <div id="analysisTab" class="tab-content active">
     <h2>📈 Time Series Analysis Tool</h2>
-    <p><b>Upload a CSV file with columns:</b> <code>Date, Close</code> (and optionally Open, High, Low, Volume)</p>
-    <input type="file" id="fileInput" accept=".csv"><br>
-    <button id="analyzeBtn" style="margin: 10px 0; padding: 10px 20px; font-size: 16px; cursor: pointer; background-color: #007bff; color: white; border: none; border-radius: 4px;" disabled>Analyze</button>
+    <div class="analysis-upload-card">
+      <div class="analysis-upload-header">
+        <h3>Dataset Upload</h3>
+        <span class="analysis-upload-badge">Up to 5 CSV files</span>
+      </div>
+      <p class="analysis-upload-hint"><b>Required columns:</b> <code>Date</code>, <code>Close</code> · Optional: <code>Open</code>, <code>High</code>, <code>Low</code>, <code>Volume</code></p>
+      <input type="file" id="fileInput" accept=".csv" multiple>
+      <div class="analysis-actions">
+        <button id="analyzeBtn" class="btn-analyze" disabled>Analyze Selected Dataset</button>
+      </div>
+      <div class="upload-queue">
+        <div class="upload-queue-head">
+          <span>Uploaded Datasets</span>
+          <span id="uploadCount">0 / 5</span>
+        </div>
+        <ul id="uploadedFilesList" class="upload-file-list">
+          <li class="file-empty-state">No CSV files uploaded yet.</li>
+        </ul>
+      </div>
+    </div>
     <div id="output"></div>
     <div id="charts"></div>
   </div>
@@ -377,7 +523,7 @@
       </div>
     </div>
     <div id="chartDataSourceNote" style="margin-bottom: 16px; color:#666;">
-      Uses the CSV uploaded in the <b>📊 Analysis</b> tab.
+      Uses the selected dataset from the <b>📊 Analysis</b> tab.
     </div>
     <div id="chartContainer">
       <canvas id="candlestickChart"></canvas>
@@ -393,7 +539,7 @@
       <div class="control-group">
         <label>CSV Data</label>
         <div id="backtestDataSourceNote" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; background: #fff; color:#666;">
-          Uses the CSV uploaded in the <b>📊 Analysis</b> tab.
+          Uses the selected dataset from the <b>📊 Analysis</b> tab.
         </div>
       </div>
       <div class="control-group">
@@ -440,16 +586,16 @@
     </div>
   </div>
 
-  <!-- Tab 4: n8n Correlation -->
+  <!-- Tab 4: Correlation -->
   <div id="n8nTab" class="tab-content">
-    <h2>🧩 World Events Correlation (n8n)</h2>
+    <h2>🧩 World Events Correlation</h2>
     <p>
-      Converts the latest analysis into JSON and sends it to an n8n webhook.
-      The n8n workflow can enrich it with world-event signals (war/conflict + oil) and return correlation + insights.
+      Converts the latest analysis into JSON and sends it to a correlation webhook.
+      The workflow enriches it with world-event signals (war/conflict + oil) and returns correlation + insights.
     </p>
 
     <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; margin: 16px 0;">
-      <button class="btn-backtest" id="invokeN8nBtn">Invoke n8n</button>
+      <button class="btn-backtest" id="invokeN8nBtn">Run Correlation</button>
     </div>
 
     <div style="margin-top: 10px;">
@@ -1070,6 +1216,9 @@
     }
 
     function syncChartAndBacktestFromAnalysisUpload() {
+      const chartSourceNote = document.getElementById('chartDataSourceNote');
+      const backtestSourceNote = document.getElementById('backtestDataSourceNote');
+
       if (!uploadedFileContent) {
         chartData = [];
         backtestData = [];
@@ -1077,6 +1226,8 @@
         updateChartHeaderFromData();
         drawCandlestickChart(chartData);
         document.getElementById('runBacktest').disabled = true;
+        chartSourceNote.innerHTML = 'Uses the selected dataset from the <b>📊 Analysis</b> tab.';
+        backtestSourceNote.innerHTML = 'Uses the selected dataset from the <b>📊 Analysis</b> tab.';
         return;
       }
 
@@ -1090,6 +1241,11 @@
         drawCandlestickChart(chartData);
       }
       document.getElementById('runBacktest').disabled = backtestData.length === 0;
+
+      if (analysisSourceFileName) {
+        chartSourceNote.innerHTML = `Using dataset: <b>${analysisSourceFileName}</b>`;
+        backtestSourceNote.innerHTML = `Using dataset: <b>${analysisSourceFileName}</b>`;
+      }
     }
     
     // Add mouse move event for hover tooltips
@@ -1460,6 +1616,8 @@
     let analysisPayload = null;
     let analysisSourceFileName = null;
     let uploadedImageBase64 = null;
+    let uploadedCsvFiles = [];
+    let activeCsvFileId = null;
     
     const aiPanel = document.getElementById('aiPanel');
     const aiMessages = document.getElementById('aiMessages');
@@ -1853,6 +2011,57 @@
       imageFileInput.value = '';
     });
 
+    function formatFileSize(bytes) {
+      if (!Number.isFinite(bytes) || bytes < 1024) return `${bytes || 0} B`;
+      const kb = bytes / 1024;
+      if (kb < 1024) return `${kb.toFixed(1)} KB`;
+      return `${(kb / 1024).toFixed(1)} MB`;
+    }
+
+    function renderUploadedFilesList() {
+      const listEl = document.getElementById('uploadedFilesList');
+      const countEl = document.getElementById('uploadCount');
+      countEl.textContent = `${uploadedCsvFiles.length} / 5`;
+
+      if (uploadedCsvFiles.length === 0) {
+        listEl.innerHTML = '<li class="file-empty-state">No CSV files uploaded yet.</li>';
+        return;
+      }
+
+      listEl.innerHTML = uploadedCsvFiles.map(file => `
+        <li class="upload-file-item">
+          <div class="upload-file-meta">
+            <div class="upload-file-name" title="${file.name}">${file.name}</div>
+            <div class="upload-file-size">${formatFileSize(file.size)}</div>
+          </div>
+          <button class="file-select-btn ${file.id === activeCsvFileId ? 'active' : ''}" data-file-id="${file.id}">
+            ${file.id === activeCsvFileId ? 'Selected' : 'Use for Analysis'}
+          </button>
+        </li>
+      `).join('');
+
+      listEl.querySelectorAll('.file-select-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          setActiveCsvFile(btn.getAttribute('data-file-id'));
+        });
+      });
+    }
+
+    function setActiveCsvFile(fileId) {
+      const file = uploadedCsvFiles.find(f => f.id === fileId);
+      if (!file) return;
+
+      activeCsvFileId = file.id;
+      uploadedFileContent = file.content;
+      analysisSourceFileName = file.name;
+      document.getElementById('output').textContent = `Selected file "${file.name}". Click Analyze to process.`;
+      document.getElementById('charts').innerHTML = '';
+      document.getElementById('analyzeBtn').disabled = false;
+      renderUploadedFilesList();
+
+      try { syncChartAndBacktestFromAnalysisUpload(); } catch {}
+    }
+
     // Original analysis code
     let pyodideReady = loadPyodide();
     let uploadedFileContent = null;
@@ -2133,26 +2342,45 @@ analysis_summary
     }
 
     document.getElementById("fileInput").addEventListener("change", async (evt) => {
-      const file = evt.target.files[0];
-      if (!file) {
-        document.getElementById("analyzeBtn").disabled = true;
-        uploadedFileContent = null;
-        analysisSourceFileName = null;
-        try { syncChartAndBacktestFromAnalysisUpload(); } catch {}
+      const files = Array.from(evt.target.files || []);
+      if (files.length === 0) {
         return;
       }
 
-      analysisSourceFileName = file.name;
-      
-      const arrayBuffer = await file.arrayBuffer();
-      uploadedFileContent = new Uint8Array(arrayBuffer);
-      
-      document.getElementById("output").textContent = `File "${file.name}" loaded. Click Analyze to process.`;
-      document.getElementById("charts").innerHTML = "";
-      document.getElementById("analyzeBtn").disabled = false;
+      const availableSlots = Math.max(0, 5 - uploadedCsvFiles.length);
+      if (availableSlots === 0) {
+        alert('You can upload up to 5 CSV files only.');
+        evt.target.value = '';
+        return;
+      }
 
-      // Reuse the same uploaded CSV for Tab 2 (Chart) and Tab 3 (Backtest)
-      try { syncChartAndBacktestFromAnalysisUpload(); } catch {}
+      let filesToAdd = files;
+      if (files.length > availableSlots) {
+        filesToAdd = files.slice(0, availableSlots);
+        alert(`Only ${availableSlots} file(s) were added. Maximum allowed is 5.`);
+      }
+
+      for (const file of filesToAdd) {
+        const id = `${file.name}__${file.size}__${file.lastModified}`;
+        const exists = uploadedCsvFiles.some(f => f.id === id);
+        if (exists) continue;
+
+        const arrayBuffer = await file.arrayBuffer();
+        uploadedCsvFiles.push({
+          id,
+          name: file.name,
+          size: file.size,
+          content: new Uint8Array(arrayBuffer),
+        });
+      }
+
+      if (!activeCsvFileId && uploadedCsvFiles.length > 0) {
+        setActiveCsvFile(uploadedCsvFiles[0].id);
+      } else {
+        renderUploadedFilesList();
+      }
+
+      evt.target.value = '';
     });
 
     document.getElementById("analyzeBtn").addEventListener("click", async () => {
@@ -2363,7 +2591,7 @@ analysis_summary
 
     async function invokeN8n() {
       if (!analysisPayload) {
-        alert('Run Analysis first (Tab: Analysis) so there is data to send to n8n.');
+        alert('Run Analysis first (Tab: Analysis) so there is data to send to the correlation workflow.');
         return;
       }
 
@@ -2376,7 +2604,7 @@ analysis_summary
 
       const btn = document.getElementById('invokeN8nBtn');
       btn.disabled = true;
-      setN8nStatus('Invoking n8n…');
+      setN8nStatus('Running correlation workflow…');
 
       try {
         const resp = await fetch(webhookUrl, {
@@ -2394,10 +2622,10 @@ analysis_summary
         }
 
         if (!resp.ok) {
-          throw new Error(`n8n webhook error (${resp.status}): ${typeof body === 'string' ? body : safeJsonStringify(body)}`);
+          throw new Error(`Correlation webhook error (${resp.status}): ${typeof body === 'string' ? body : safeJsonStringify(body)}`);
         }
 
-        setN8nStatus('n8n response received.');
+        setN8nStatus('Correlation response received.');
         document.getElementById('n8nResponse').textContent = typeof body === 'string' ? body : safeJsonStringify(body);
         if (typeof body === 'object') {
           renderN8nResult(body);

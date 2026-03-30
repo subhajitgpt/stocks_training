@@ -484,6 +484,17 @@
   <!-- Tab 1: Analysis -->
   <div id="analysisTab" class="tab-content active">
     <h2>📈 Time Series Analysis Tool</h2>
+    <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; margin: 10px 0 16px;">
+      <div style="min-width:240px;">
+        <label style="display:block; font-weight:600; margin-bottom:6px;">Display Currency</label>
+        <select id="appCurrency" style="width:100%; padding: 10px 12px; border:1px solid #ddd; border-radius:8px; background:#fff;">
+          <option value="INR">INR (₹)</option>
+          <option value="USD">USD ($)</option>
+          <option value="AED">AED (AED)</option>
+        </select>
+        <div style="font-size:12px; color:#666; margin-top:6px;">Applies to price display, backtest amounts, and webhook payload.</div>
+      </div>
+    </div>
     <div class="analysis-upload-card">
       <div class="analysis-upload-header">
         <h3>Dataset Upload</h3>
@@ -512,7 +523,7 @@
   <div id="chartTab" class="tab-content">
     <div class="stock-header">
       <div class="stock-info">
-        <h2 id="stockTitle">Stock Data · 1D · NSE</h2>
+        <h2 id="stockTitle">Stock Data · 1D</h2>
         <div class="price-data">
           <span>O <span id="openPrice">--</span></span>
           <span>H <span id="highPrice">--</span></span>
@@ -543,7 +554,7 @@
         </div>
       </div>
       <div class="control-group">
-        <label>Initial Capital (₹)</label>
+        <label>Initial Capital (<span id="currencyLabelBacktest">INR</span>)</label>
         <input type="number" id="initialCapital" value="100000" min="1000" step="1000">
       </div>
       <div class="control-group">
@@ -677,10 +688,111 @@
       }
     }
 
+    // ============ Currency (shared across tabs) ============
+    const MP_CURRENCY_STORAGE_KEY = 'mp.currency';
+    const MP_SUPPORTED_CURRENCIES = ['INR', 'USD', 'AED'];
+    const mpCurrencySymbolMap = { INR: '₹', USD: '$', AED: 'AED ' };
+    const mpCurrencyLocaleMap = { INR: 'en-IN', USD: 'en-US', AED: 'en-AE' };
+    const mpCurrencyFormatterCache = new Map();
+    let mpCurrencyCode = 'INR';
+    let lastBacktestResults = null;
+
+    function mpGetCurrencyCode() {
+      return mpCurrencyCode;
+    }
+
+    function mpCurrencySymbol(code = mpCurrencyCode) {
+      return mpCurrencySymbolMap[code] || '';
+    }
+
+    function mpGetMoneyFormatter(code = mpCurrencyCode, maximumFractionDigits = 2) {
+      const safeCode = MP_SUPPORTED_CURRENCIES.includes(code) ? code : 'INR';
+      const key = `${safeCode}:${maximumFractionDigits}`;
+      if (mpCurrencyFormatterCache.has(key)) return mpCurrencyFormatterCache.get(key);
+      const locale = mpCurrencyLocaleMap[safeCode] || 'en-US';
+      const fmt = new Intl.NumberFormat(locale, {
+        style: 'currency',
+        currency: safeCode,
+        maximumFractionDigits,
+        minimumFractionDigits: maximumFractionDigits
+      });
+      mpCurrencyFormatterCache.set(key, fmt);
+      return fmt;
+    }
+
+    function mpFmtMoney(value, maximumFractionDigits = 2) {
+      const num = Number(value);
+      if (!Number.isFinite(num)) return 'N/A';
+      return mpGetMoneyFormatter(mpCurrencyCode, maximumFractionDigits).format(num);
+    }
+
+    function mpFmtMoneySigned(value, maximumFractionDigits = 2) {
+      const num = Number(value);
+      if (!Number.isFinite(num)) return 'N/A';
+      const sign = num >= 0 ? '+' : '-';
+      return `${sign}${mpFmtMoney(Math.abs(num), maximumFractionDigits)}`;
+    }
+
+    // Fast path for canvas axis/tooltip (keeps the chart snappy)
+    function mpFmtPriceFast(value, digits = 2) {
+      const num = Number(value);
+      if (!Number.isFinite(num)) return 'N/A';
+      return `${mpCurrencySymbol()}${num.toFixed(digits)}`;
+    }
+
+    function mpSetCurrencyCode(code) {
+      const next = MP_SUPPORTED_CURRENCIES.includes(code) ? code : 'INR';
+      mpCurrencyCode = next;
+      try { localStorage.setItem(MP_CURRENCY_STORAGE_KEY, next); } catch {}
+      mpApplyCurrencyToUi({ rerender: true });
+    }
+
+    function mpApplyCurrencyToUi({ rerender } = { rerender: false }) {
+      const currencySelect = document.getElementById('appCurrency');
+      if (currencySelect && currencySelect.value !== mpCurrencyCode) currencySelect.value = mpCurrencyCode;
+
+      const backtestLabel = document.getElementById('currencyLabelBacktest');
+      if (backtestLabel) backtestLabel.textContent = mpCurrencyCode;
+
+      // Update chart header + title
+      const titleEl = document.getElementById('stockTitle');
+      if (titleEl) {
+        titleEl.textContent = `Stock Data · 1D · ${mpCurrencyCode}`;
+      }
+
+      if (rerender) {
+        try {
+          updateChartHeaderFromData();
+          if (chartData && chartData.length > 0) drawCandlestickChart(chartData, hoveredCandle);
+        } catch {}
+        try {
+          if (lastBacktestResults && document.getElementById('backtestResults')?.style?.display !== 'none') {
+            displayBacktestResults(lastBacktestResults, { skipScroll: true });
+          }
+        } catch {}
+      }
+    }
+
+    function mpInitCurrency() {
+      let stored = null;
+      try { stored = localStorage.getItem(MP_CURRENCY_STORAGE_KEY); } catch {}
+      if (stored && MP_SUPPORTED_CURRENCIES.includes(stored)) mpCurrencyCode = stored;
+      mpApplyCurrencyToUi({ rerender: false });
+
+      const currencySelect = document.getElementById('appCurrency');
+      if (currencySelect) {
+        currencySelect.value = mpCurrencyCode;
+        currencySelect.addEventListener('change', () => mpSetCurrencyCode(currencySelect.value));
+      }
+    }
+
     // Candlestick chart variables
     let chartData = [];
     let hoveredCandle = null;
     let chartMetrics = null;
+
+    // Safe to init currency only after core state vars exist
+    mpInitCurrency();
     
     // Calculate Moving Average
     function calculateMA(data, period) {
@@ -791,7 +903,7 @@
       ctx.textAlign = 'center';
       ctx.translate(20, padding.top + chartHeight / 2);
       ctx.rotate(-Math.PI / 2);
-      ctx.fillText('Price (₹)', 0, 0);
+        ctx.fillText(`Price (${mpGetCurrencyCode()})`, 0, 0);
       ctx.restore();
       
       // Draw grid lines with price labels
@@ -809,7 +921,7 @@
         ctx.fillStyle = '#b2b5be';
         ctx.font = '12px Arial';
         ctx.textAlign = 'left';
-        ctx.fillText('₹' + price.toFixed(2), width - padding.right + 5, y + 4);
+        ctx.fillText(mpFmtPriceFast(price, 2), width - padding.right + 5, y + 4);
       }
       
       // Draw candlesticks
@@ -1055,19 +1167,19 @@
         ctx.font = '12px Arial';
         ctx.fillStyle = '#b2b5be';
         const lines = [
-          { label: 'Open:', value: '₹' + candle.open.toFixed(2), color: '#b2b5be' },
-          { label: 'High:', value: '₹' + candle.high.toFixed(2), color: '#26a69a' },
-          { label: 'Low:', value: '₹' + candle.low.toFixed(2), color: '#ef5350' },
-          { label: 'Close:', value: '₹' + candle.close.toFixed(2), color: '#ffffff' },
+          { label: 'Open:', value: mpFmtPriceFast(candle.open, 2), color: '#b2b5be' },
+          { label: 'High:', value: mpFmtPriceFast(candle.high, 2), color: '#26a69a' },
+          { label: 'Low:', value: mpFmtPriceFast(candle.low, 2), color: '#ef5350' },
+          { label: 'Close:', value: mpFmtPriceFast(candle.close, 2), color: '#ffffff' },
           { label: 'Volume:', value: (candle.volume / 1000000).toFixed(2) + 'M', color: '#b2b5be' }
         ];
         
         // Add MA values to tooltip
         if (ma21[hoverIndex] !== null) {
-          lines.push({ label: '21 MA:', value: '₹' + ma21[hoverIndex].toFixed(2), color: '#2196F3' });
+          lines.push({ label: '21 MA:', value: mpFmtPriceFast(ma21[hoverIndex], 2), color: '#2196F3' });
         }
         if (ma50[hoverIndex] !== null) {
-          lines.push({ label: '50 MA:', value: '₹' + ma50[hoverIndex].toFixed(2), color: '#EF5350' });
+          lines.push({ label: '50 MA:', value: mpFmtPriceFast(ma50[hoverIndex], 2), color: '#EF5350' });
         }
         
         lines.forEach((line, i) => {
@@ -1080,10 +1192,10 @@
         });
         
         // Update header with hovered candle data
-        document.getElementById('openPrice').textContent = candle.open.toFixed(2);
-        document.getElementById('highPrice').textContent = candle.high.toFixed(2);
-        document.getElementById('lowPrice').textContent = candle.low.toFixed(2);
-        document.getElementById('closePrice').textContent = candle.close.toFixed(2);
+        document.getElementById('openPrice').textContent = mpFmtPriceFast(candle.open, 2);
+        document.getElementById('highPrice').textContent = mpFmtPriceFast(candle.high, 2);
+        document.getElementById('lowPrice').textContent = mpFmtPriceFast(candle.low, 2);
+        document.getElementById('closePrice').textContent = mpFmtPriceFast(candle.close, 2);
       }
     }
     
@@ -1200,10 +1312,10 @@
       const change = previous ? (latest.close - previous.close) : 0;
       const changePercent = previous ? (change / previous.close) * 100 : 0;
 
-      document.getElementById('openPrice').textContent = latest.open.toFixed(2);
-      document.getElementById('highPrice').textContent = latest.high.toFixed(2);
-      document.getElementById('lowPrice').textContent = latest.low.toFixed(2);
-      document.getElementById('closePrice').textContent = latest.close.toFixed(2);
+      document.getElementById('openPrice').textContent = mpFmtPriceFast(latest.open, 2);
+      document.getElementById('highPrice').textContent = mpFmtPriceFast(latest.high, 2);
+      document.getElementById('lowPrice').textContent = mpFmtPriceFast(latest.low, 2);
+      document.getElementById('closePrice').textContent = mpFmtPriceFast(latest.close, 2);
 
       const priceChangeEl = document.getElementById('priceChange');
       if (previous) {
@@ -1283,10 +1395,10 @@
         // Reset header to latest data
         if (chartData.length > 0) {
           const latest = chartData[chartData.length - 1];
-          document.getElementById('openPrice').textContent = latest.open.toFixed(2);
-          document.getElementById('highPrice').textContent = latest.high.toFixed(2);
-          document.getElementById('lowPrice').textContent = latest.low.toFixed(2);
-          document.getElementById('closePrice').textContent = latest.close.toFixed(2);
+          document.getElementById('openPrice').textContent = mpFmtPriceFast(latest.open, 2);
+          document.getElementById('highPrice').textContent = mpFmtPriceFast(latest.high, 2);
+          document.getElementById('lowPrice').textContent = mpFmtPriceFast(latest.low, 2);
+          document.getElementById('closePrice').textContent = mpFmtPriceFast(latest.close, 2);
         }
       }
       canvas.style.cursor = 'default';
@@ -1301,10 +1413,10 @@
         // Reset header to latest data
         if (chartData.length > 0) {
           const latest = chartData[chartData.length - 1];
-          document.getElementById('openPrice').textContent = latest.open.toFixed(2);
-          document.getElementById('highPrice').textContent = latest.high.toFixed(2);
-          document.getElementById('lowPrice').textContent = latest.low.toFixed(2);
-          document.getElementById('closePrice').textContent = latest.close.toFixed(2);
+          document.getElementById('openPrice').textContent = mpFmtPriceFast(latest.open, 2);
+          document.getElementById('highPrice').textContent = mpFmtPriceFast(latest.high, 2);
+          document.getElementById('lowPrice').textContent = mpFmtPriceFast(latest.low, 2);
+          document.getElementById('closePrice').textContent = mpFmtPriceFast(latest.close, 2);
         }
       }
       document.getElementById('candlestickChart').style.cursor = 'default';
@@ -1454,8 +1566,9 @@
       });
     });
     
-    function displayBacktestResults(results) {
+    function displayBacktestResults(results, opts = {}) {
       document.getElementById('backtestResults').style.display = 'block';
+      lastBacktestResults = results;
       
       // Display metrics
       const metricsHTML = `
@@ -1465,7 +1578,7 @@
         </div>
         <div class="metric-card">
           <div class="metric-label">Final Capital</div>
-          <div class="metric-value">₹${results.finalCapital.toFixed(2)}</div>
+          <div class="metric-value">${mpFmtMoney(results.finalCapital, 2)}</div>
         </div>
         <div class="metric-card">
           <div class="metric-label">Buy & Hold Return</div>
@@ -1489,11 +1602,11 @@
         </div>
         <div class="metric-card positive">
           <div class="metric-label">Avg Profit</div>
-          <div class="metric-value">₹${results.avgProfit.toFixed(2)}</div>
+          <div class="metric-value">${mpFmtMoney(results.avgProfit, 2)}</div>
         </div>
         <div class="metric-card negative">
           <div class="metric-label">Avg Loss</div>
-          <div class="metric-value">₹${Math.abs(results.avgLoss).toFixed(2)}</div>
+          <div class="metric-value">${mpFmtMoney(Math.abs(results.avgLoss), 2)}</div>
         </div>
       `;
       document.getElementById('metricsGrid').innerHTML = metricsHTML;
@@ -1529,7 +1642,7 @@
         ctx.fillStyle = '#666';
         ctx.font = '12px Arial';
         ctx.textAlign = 'right';
-        ctx.fillText('₹' + (value/1000).toFixed(1) + 'K', padding.left - 10, y + 4);
+        ctx.fillText(`${mpCurrencySymbol()}${(value/1000).toFixed(1)}K`, padding.left - 10, y + 4);
       }
       
       // Draw equity curve
@@ -1567,18 +1680,20 @@
           <td>${idx + 1}</td>
           <td><strong>${trade.type}</strong></td>
           <td>${trade.date.toLocaleDateString('en-GB')}</td>
-          <td>₹${trade.price.toFixed(2)}</td>
+          <td>${mpFmtMoney(trade.price, 2)}</td>
           <td>${trade.quantity}</td>
-          <td>₹${trade.value.toFixed(2)}</td>
-          <td class="${trade.pl >= 0 ? 'profit' : 'loss'}">${trade.pl >= 0 ? '+' : ''}₹${trade.pl.toFixed(2)}</td>
+          <td>${mpFmtMoney(trade.value, 2)}</td>
+          <td class="${trade.pl >= 0 ? 'profit' : 'loss'}">${mpFmtMoneySigned(trade.pl, 2)}</td>
           <td class="${trade.plPercent >= 0 ? 'profit' : 'loss'}">${trade.plPercent >= 0 ? '+' : ''}${trade.plPercent.toFixed(2)}%</td>
-          <td>₹${trade.capital.toFixed(2)}</td>
+          <td>${mpFmtMoney(trade.capital, 2)}</td>
         </tr>
       `).join('');
       document.getElementById('tradesTableBody').innerHTML = tradesHTML;
       
       // Scroll to results
-      document.getElementById('backtestResults').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      if (!opts.skipScroll) {
+        document.getElementById('backtestResults').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
     }
 
     // Encryption/Decryption functions matching encrypt_keys.py
@@ -2438,6 +2553,8 @@ analysis_summary
       // Make a shallow copy so we don't mutate the stored payload unexpectedly
       const payload = JSON.parse(JSON.stringify(analysisPayload));
 
+      payload.currency_code = payload.currency_code || mpGetCurrencyCode();
+
       payload.source_file = payload.source_file || analysisSourceFileName || null;
       payload.ticker = payload.ticker || payload.symbol || inferSymbolFromFileName(payload.source_file);
 
@@ -2476,6 +2593,85 @@ analysis_summary
       }
 
       return payload;
+    }
+
+    function mpSensitivityWeight(val) {
+      const s = String(val || '').toLowerCase();
+      if (s.includes('high')) return 1.0;
+      if (s.includes('medium') || s.includes('moderate')) return 0.6;
+      if (s.includes('low')) return 0.3;
+      return 0.5;
+    }
+
+    function mpClamp(val, min, max) {
+      return Math.max(min, Math.min(max, val));
+    }
+
+    function mpComputeShockAmplifier({ currentVolatilityPct, avgVolatilityPct, rsi14, recentReturnPct }) {
+      const curVol = Number(currentVolatilityPct);
+      const avgVol = Number(avgVolatilityPct);
+      const rsi = Number(rsi14);
+      const ret = Number(recentReturnPct);
+
+      // Volatility-based amplifier (stock-specific): higher recent vol vs its own average => higher sensitivity
+      let volFactor = 1.0;
+      if (Number.isFinite(curVol) && Number.isFinite(avgVol) && avgVol > 0) {
+        const ratio = curVol / avgVol;
+        // sqrt keeps it gentle; clamp avoids runaway
+        volFactor = mpClamp(Math.sqrt(ratio), 0.85, 1.25);
+      }
+
+      // RSI extremes make price more “fragile” to macro headlines
+      let rsiFactor = 1.0;
+      if (Number.isFinite(rsi)) {
+        if (rsi >= 70 || rsi <= 30) rsiFactor = 1.07;
+        if (rsi >= 80 || rsi <= 20) rsiFactor = 1.12;
+      }
+
+      // If the stock is already weak (negative recent return), macro shocks tend to amplify downside
+      let weaknessFactor = 1.0;
+      if (Number.isFinite(ret)) {
+        if (ret <= -10) weaknessFactor = 1.10;
+        else if (ret <= -5) weaknessFactor = 1.06;
+        else if (ret >= 10) weaknessFactor = 0.96;
+        else if (ret >= 5) weaknessFactor = 0.98;
+      }
+
+      const amplifier = mpClamp(volFactor * rsiFactor * weaknessFactor, 0.80, 1.30);
+      return { amplifier, volFactor, rsiFactor, weaknessFactor };
+    }
+
+    function mpComputeOptimizedMacroRisk({ warRiskScore, oilRiskScore, warSensitivity, oilSensitivity, stock }) {
+      const war = Number(warRiskScore);
+      const oil = Number(oilRiskScore);
+      const warOk = Number.isFinite(war);
+      const oilOk = Number.isFinite(oil);
+      if (!warOk && !oilOk) {
+        return { riskScore: null, level: 'N/A', details: 'No war/oil risk scores returned.' };
+      }
+
+      const wWar = mpSensitivityWeight(warSensitivity);
+      const wOil = mpSensitivityWeight(oilSensitivity);
+      let numerator = 0;
+      let denom = 0;
+      if (warOk) { numerator += war * wWar; denom += wWar; }
+      if (oilOk) { numerator += oil * wOil; denom += wOil; }
+      const weighted = denom > 0 ? (numerator / denom) : null;
+
+      const shock = mpComputeShockAmplifier({
+        currentVolatilityPct: stock?.current_volatility_pct,
+        avgVolatilityPct: stock?.avg_volatility_pct,
+        rsi14: stock?.rsi_14,
+        recentReturnPct: stock?.recent_stock_return_pct
+      });
+
+      const riskScore = weighted == null ? null : mpClamp(weighted * shock.amplifier, 0, 100);
+      const level = (riskScore == null) ? 'N/A' : (riskScore >= 70 ? 'High' : riskScore >= 40 ? 'Moderate' : 'Low');
+      return {
+        riskScore,
+        level,
+        details: `Sensitivity(war=${wWar.toFixed(1)}, oil=${wOil.toFixed(1)}); shockAmplifier=${shock.amplifier.toFixed(2)} (vol=${shock.volFactor.toFixed(2)}, rsi=${shock.rsiFactor.toFixed(2)}, weakness=${shock.weaknessFactor.toFixed(2)})`
+      };
     }
 
     function metricCard(label, value, tone = null) {
@@ -2549,6 +2745,14 @@ analysis_summary
       const maSignal = stock.ma_signal || result.ma_signal || 'N/A';
       const effectOnStock = corr.effect_on_stock || result.effect_on_stock || 'N/A';
 
+      const optimized = mpComputeOptimizedMacroRisk({
+        warRiskScore: macro.war_news_risk_score ?? result.war_news_risk_score,
+        oilRiskScore: macro.oil_risk_score ?? result.oil_risk_score,
+        warSensitivity: corr.likely_war_sensitivity || result.likely_war_sensitivity,
+        oilSensitivity: corr.likely_oil_sensitivity || result.likely_oil_sensitivity,
+        stock
+      });
+
       const priceTone = Number(priceChange) >= 0 ? 'positive' : 'negative';
       const recentReturnTone = Number(stock.recent_stock_return_pct ?? result.recent_stock_return_pct) >= 0 ? 'positive' : 'negative';
 
@@ -2565,18 +2769,19 @@ analysis_summary
         metricCard('Ticker', ticker),
         metricCard('Symbol', symbol),
         metricCard('Source File', sourceFile),
-        metricCard('Current Price', Number.isFinite(Number(price)) ? formatMaybeNumber(price, 2) : 'N/A'),
+        metricCard('Current Price', Number.isFinite(Number(price)) ? mpFmtMoney(price, 2) : 'N/A'),
         metricCard('Price Change', formatMaybeNumber(priceChange, 2, '%'), Number.isFinite(Number(priceChange)) ? priceTone : null),
         metricCard('RSI (14)', formatMaybeNumber(stock.rsi_14 ?? result.rsi_14, 2)),
         metricCard('Volatility (Current)', formatMaybeNumber(stock.current_volatility_pct ?? result.current_volatility_pct, 2, '%')),
         metricCard('Volatility (Average)', formatMaybeNumber(stock.avg_volatility_pct ?? result.avg_volatility_pct, 2, '%')),
         metricCard('MA Signal', maSignal, maTone),
-        metricCard('MA 50', formatMaybeNumber(stock.ma_50 ?? result.ma_50, 2)),
-        metricCard('MA 200', formatMaybeNumber(stock.ma_200 ?? result.ma_200, 2)),
+        metricCard('MA 50', Number.isFinite(Number(stock.ma_50 ?? result.ma_50)) ? mpFmtMoney(stock.ma_50 ?? result.ma_50, 2) : 'N/A'),
+        metricCard('MA 200', Number.isFinite(Number(stock.ma_200 ?? result.ma_200)) ? mpFmtMoney(stock.ma_200 ?? result.ma_200, 2) : 'N/A'),
         metricCard('Recent Return', formatMaybeNumber(stock.recent_stock_return_pct ?? result.recent_stock_return_pct, 2, '%'), Number.isFinite(Number(stock.recent_stock_return_pct ?? result.recent_stock_return_pct)) ? recentReturnTone : null),
         metricCard('Macro Risk', macroRisk, macroTone),
         metricCard('War Risk Score', Number.isFinite(Number(macro.war_news_risk_score ?? result.war_news_risk_score)) ? `${Number(macro.war_news_risk_score ?? result.war_news_risk_score)}/100` : 'N/A'),
         metricCard('Oil Risk Score', Number.isFinite(Number(macro.oil_risk_score ?? result.oil_risk_score)) ? `${Number(macro.oil_risk_score ?? result.oil_risk_score)}/100` : 'N/A'),
+        metricCard('Optimized Macro Risk', optimized.riskScore == null ? 'N/A' : `${optimized.riskScore.toFixed(1)}/100 (${optimized.level})`),
         metricCard('Oil Sensitivity', corr.likely_oil_sensitivity || result.likely_oil_sensitivity || 'N/A'),
         metricCard('War Sensitivity', corr.likely_war_sensitivity || result.likely_war_sensitivity || 'N/A'),
         metricCard('Effect on Stock', effectOnStock)
@@ -2587,6 +2792,16 @@ analysis_summary
       renderNewsList('n8nOilNews', result.news?.oil);
       document.getElementById('n8nSummary').textContent = result.summary || '';
       view.style.display = 'block';
+
+      // Append scoring explanation (kept minimal; helps verify per-stock normalization)
+      try {
+        const summaryEl = document.getElementById('n8nSummary');
+        if (summaryEl) {
+          const base = result.summary || '';
+          const extra = optimized?.details ? `\n\nOptimized Macro Risk details: ${optimized.details}` : '';
+          summaryEl.textContent = `${base}${extra}`.trim();
+        }
+      } catch {}
     }
 
     async function invokeN8n() {
